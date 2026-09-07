@@ -532,6 +532,10 @@ pub async fn storage(st: &AdminState, method: &str) -> AdminResult {
 }
 
 #[cfg(unix)]
+// The statvfs widening below is a no-op on whichever platform already has the
+// wider field, so one of the conversions is always "useless" - but which one
+// depends on the target, so it cannot be written to satisfy the lint everywhere.
+#[allow(clippy::useless_conversion)]
 fn disk_usage(path: &Path) -> Option<serde_json::Value> {
     use std::ffi::CString;
     use std::mem::MaybeUninit;
@@ -543,9 +547,11 @@ fn disk_usage(path: &Path) -> Option<serde_json::Value> {
         return None;
     }
     let stat = unsafe { stat.assume_init() };
-    let bsize = stat.f_frsize;
-    let total_bytes = stat.f_blocks * bsize;
-    let avail_bytes = stat.f_bavail * bsize;
+    // statvfs field widths are platform-dependent: f_blocks/f_bavail are 32-bit
+    // on macOS and 64-bit on Linux, so widen before multiplying.
+    let bsize = u64::from(stat.f_frsize);
+    let total_bytes = u64::from(stat.f_blocks) * bsize;
+    let avail_bytes = u64::from(stat.f_bavail) * bsize;
     let used_bytes = total_bytes.saturating_sub(avail_bytes);
     let percent_used = if total_bytes > 0 {
         used_bytes as f64 / total_bytes as f64 * 100.0
