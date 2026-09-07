@@ -47,6 +47,7 @@ import (
 	"github.com/themadorg/madmail/framework/log"
 	"github.com/themadorg/madmail/framework/module"
 	"github.com/themadorg/madmail/internal/auth/pass_table"
+	"github.com/themadorg/madmail/internal/connmetrics"
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/shadowsocks/go-shadowsocks2/core"
@@ -885,13 +886,13 @@ func (e *Endpoint) handleALPNConn(conn net.Conn, httpConns, smtpConns, imapConns
 		case "smtp":
 			if e.smtpModule != nil {
 				e.logger.Msg("ALPN proxy: routing to internal smtp", "remote", conn.RemoteAddr())
-				smtpConns <- tls.Server(bConn, e.tlsConfig)
+				smtpConns <- tls.Server(connmetrics.WrapConn(bConn, e.smtpModule.InstanceName()), e.tlsConfig)
 				return
 			}
 		case "imap":
 			if e.imapModule != nil {
 				e.logger.Msg("ALPN proxy: routing to internal imap", "remote", conn.RemoteAddr())
-				imapConns <- tls.Server(bConn, e.tlsConfig)
+				imapConns <- tls.Server(connmetrics.WrapConn(bConn, e.imapModule.InstanceName()), e.tlsConfig)
 				return
 			}
 		}

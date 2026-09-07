@@ -43,6 +43,7 @@ import (
 	"github.com/themadorg/madmail/framework/module"
 	"github.com/themadorg/madmail/internal/auth"
 	"github.com/themadorg/madmail/internal/authz"
+	"github.com/themadorg/madmail/internal/connmetrics"
 	"github.com/themadorg/madmail/internal/limits"
 	"github.com/themadorg/madmail/internal/msgpipeline"
 	"github.com/themadorg/madmail/internal/proxy_protocol"
@@ -326,6 +327,7 @@ func (endp *Endpoint) setupListeners(addresses []config.Endpoint) error {
 		if err != nil {
 			return fmt.Errorf("%s: %w", endp.name, err)
 		}
+		l = connmetrics.NewListener(l, endp.name)
 		endp.Log.Printf("listening on %v", addr)
 
 		if addr.IsTLS() {
