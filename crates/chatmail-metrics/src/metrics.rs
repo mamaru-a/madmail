@@ -191,22 +191,48 @@ pub(crate) fn gather_bytes() -> Result<Vec<u8>, prometheus::Error> {
 }
 
 /// Parse a counter/gauge sample from Prometheus text exposition.
-#[cfg(test)]
-pub fn sample_value(body: &str, metric_name: &str, label_selector: &str) -> Option<f64> {
+/// Every sample of `metric_name` in a Prometheus text exposition, as
+/// `(label set, value)` - the label set is the raw text between the braces, or
+/// empty for an unlabelled metric.
+///
+/// The name must match exactly: asking for `maddy_smtp_started` does not return
+/// samples of `maddy_smtp_started_transactions`.
+pub fn samples(body: &str, metric_name: &str) -> Vec<(String, f64)> {
+    let mut out = Vec::new();
     for line in body.lines() {
-        if line.starts_with('#') || line.is_empty() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        if !line.starts_with(metric_name) {
+        let Some(rest) = line.strip_prefix(metric_name) else {
             continue;
+        };
+        let (labels, rest) = match rest.strip_prefix('{') {
+            Some(after) => match after.split_once('}') {
+                Some((labels, rest)) => (labels.to_string(), rest),
+                None => continue,
+            },
+            // Without braces the name must end here, otherwise this is a
+            // different metric that merely starts with the same characters.
+            None if rest.starts_with(char::is_whitespace) => (String::new(), rest),
+            None => continue,
+        };
+        // The exposition format is `name{labels} value [timestamp]`; this
+        // encoder never emits timestamps.
+        if let Some(value) = rest.split_whitespace().next().and_then(|v| v.parse().ok()) {
+            out.push((labels, value));
         }
-        if !label_selector.is_empty() && !line.contains(label_selector) {
-            continue;
-        }
-        let value = line.split_whitespace().last()?;
-        return value.parse().ok();
     }
-    None
+    out
+}
+
+/// First sample of `metric_name` whose label set contains `label_selector`
+/// (empty selector matches the first sample of any label set).
+pub fn sample_value(body: &str, metric_name: &str, label_selector: &str) -> Option<f64> {
+    samples(body, metric_name)
+        .into_iter()
+        .find(|(labels, _)| label_selector.is_empty() || labels.contains(label_selector))
+        .map(|(_, value)| value)
 }
 
 #[cfg(test)]
@@ -214,6 +240,39 @@ mod tests {
     use super::*;
 
     const MODULE: &str = "metrics_unit_test";
+
+    #[test]
+    fn samples_matches_the_exact_metric_name() {
+        let body = "\
+# HELP maddy_smtp_started_transactions Amount of SMTP transactions started
+# TYPE maddy_smtp_started_transactions counter
+maddy_smtp_started_transactions{module=\"smtp\"} 7
+maddy_smtp_started_transactions{module=\"submission\"} 3
+maddy_queue_length{module=\"remote_queue\",location=\"/tmp/q\"} 2
+bare_metric 5
+";
+
+        let started = samples(body, "maddy_smtp_started_transactions");
+        assert_eq!(started.len(), 2);
+        assert_eq!(started[0].1, 7.0);
+        assert_eq!(started[1].1, 3.0);
+        assert!(started[0].0.contains(r#"module="smtp""#));
+
+        // A shorter name that is a prefix of a real one must not match it.
+        assert!(samples(body, "maddy_smtp_started").is_empty());
+
+        assert_eq!(samples(body, "bare_metric"), vec![(String::new(), 5.0)]);
+
+        assert_eq!(
+            sample_value(
+                body,
+                "maddy_smtp_started_transactions",
+                r#"module="submission""#
+            ),
+            Some(3.0)
+        );
+        assert_eq!(sample_value(body, "maddy_no_such_metric", ""), None);
+    }
 
     #[test]
     fn conn_guard_counts_while_alive() {
