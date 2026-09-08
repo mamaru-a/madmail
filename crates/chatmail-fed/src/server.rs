@@ -60,11 +60,10 @@ pub fn build_router(
 ///
 /// Split out of the accept loop so the shared-port ALPN demux can route a
 /// connection here after deciding it is not IMAP or submission.
-pub async fn serve_tls_conn(
-    tls_stream: tokio_rustls::server::TlsStream<tokio::net::TcpStream>,
-    router: Router,
-    peer: std::net::SocketAddr,
-) {
+pub async fn serve_tls_conn<S>(tls_stream: S, router: Router, peer: std::net::SocketAddr)
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
     let io = TokioIo::new(tls_stream);
     let hyper_svc = TowerToHyperService::new(router);
     // WebSocket upgrades (WebIMAP /webimap/ws) require the upgrade-aware

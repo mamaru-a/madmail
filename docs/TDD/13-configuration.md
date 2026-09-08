@@ -346,12 +346,25 @@ Either directive makes the HTTPS listener also serve mail, demultiplexed by the
 ALPN token the client offered (`crates/chatmail/src/shared_listener.rs`). The
 listener takes over the existing `http_tls` slot rather than binding 443 twice.
 
-- **ALPN only.** Never SNI: SNI names a host, not a protocol, and a browser sets
-  it from the URL bar, so SNI routing would send `https://imap.example.org/` into
-  the IMAP parser with no attacker involved.
-- **No ALPN means HTTPS.** There is no byte-sniffing fallback — IMAP and SMTP are
-  server-speaks-first while HTTP is client-speaks-first, so no first byte tells
-  them apart without hanging one side.
+Three signals identify a connection, in this order:
+
+1. **ALPN** from the ClientHello — decisive whenever present.
+2. **SNI** from the same ClientHello, consulted *only* when no ALPN was offered.
+   `imap.` / `smtp.` prefixes by default; `sni_imap` / `sni_smtp` replace them.
+3. **First bytes** after the handshake, for a client offering neither — an early
+   `EHLO`/`HELO`, a pipelined IMAP command, or an HTTP request line. Anything
+   unrecognised, silence included, is served as HTTPS.
+
+- **The order is the security property.** SNI names a host, not a protocol, and a
+  browser sets it from the URL bar, so routing on SNI *first* would send a visitor
+  to `https://imap.example.org/` into the IMAP parser with no attacker involved.
+  Every browser sends ALPN to negotiate HTTP/2, so under this order a browser is
+  always decided at step 1.
+- **Step 3 only sees clients that speak first.** IMAP and SMTP servers must greet
+  before the client may send a command, so a conforming mail client says nothing
+  here and is identified by ALPN or hostname instead. `EHLO` cannot route a
+  connection on its own — by the time a client may send it, the server has already
+  had to choose a protocol and send `220`.
 - **Strict ALPN.** A client whose offers do not intersect ours gets a fatal
   `no_application_protocol`. This is the ALPACA countermeasure of RFC 9325 §3.8,
   and it is only available because Madmail terminates TLS itself; upstream
@@ -369,3 +382,26 @@ listener takes over the existing `http_tls` slot rather than binding 443 twice.
   either — MX records name a host, not a port.
 - **Not compatible with a TLS-terminating CDN** in front of 443; that needs L4
   passthrough.
+
+#### Hostname identification (`sni_imap` / `sni_smtp`)
+
+```
+chatmail tls://0.0.0.0:443 {
+    alpn_imap imap
+    alpn_smtp smtp
+    sni_imap  mail.example.org      # optional
+    sni_smtp  send.example.org      # optional
+}
+```
+
+Unset, the conventional `imap.` / `smtp.` first labels select mail. Setting one
+**replaces** the prefix for that protocol rather than adding to it, so an operator
+choosing a neutral name does not leave `imap.` as a routable marker.
+
+The certificate must cover whichever hostname clients connect to, since the client
+validates it before any routing happens. That is the practical constraint on this
+feature: `imap.example.org` has to be in the certificate's SANs.
+
+Unlike ALPN, hostname routing works with unmodified mail clients — Thunderbird,
+Apple Mail and K-9 send no ALPN at all, so before this they could only ever reach
+HTTPS on the shared port. Point them at `imap.example.org:443` with SSL/TLS.

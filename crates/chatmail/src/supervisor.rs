@@ -44,8 +44,8 @@ use tracing::{error, info};
 use crate::logging::boot_error;
 use crate::servers::{build_http_extra, extend_dev_local_aliases};
 use crate::shared_listener::{
-    alpn_tokens, load_mail_tls_configs, run_shared_listener, MailTlsConfigs, SharedMail, ALPN_IMAP,
-    ALPN_SMTP,
+    alpn_tokens, load_mail_tls_configs, run_shared_listener, MailTlsConfigs, SharedMail, SniPolicy,
+    ALPN_IMAP, ALPN_SMTP,
 };
 
 use chatmail_imap::ImapSessionConfig;
@@ -673,6 +673,10 @@ impl SupervisorInner {
                         submission: self.submission_cfg.clone(),
                         alpn_imap: self.file_config.alpn_imap.is_some(),
                         alpn_smtp: self.file_config.alpn_smtp.is_some(),
+                        sni: SniPolicy {
+                            imap: self.file_config.sni_imap.clone(),
+                            smtp: self.file_config.sni_smtp.clone(),
+                        },
                     },
                 ),
                 None => spawn_http(
