@@ -31,7 +31,7 @@ use chatmail_imap::run_imap_listener;
 use chatmail_smtp::run_smtp_listener;
 use chatmail_state::{AppState, ReloadRequest, ReloadScope};
 use chatmail_tasks::MaintenanceHandle;
-use chatmail_tls::{load_server_config, load_server_config_with_alpn};
+use chatmail_tls::load_server_config_with_alpn;
 use chatmail_types::Result;
 use rustls::ServerConfig;
 use tokio::net::TcpListener;
@@ -43,7 +43,10 @@ use tracing::{error, info};
 
 use crate::logging::boot_error;
 use crate::servers::{build_http_extra, extend_dev_local_aliases};
-use crate::shared_listener::{alpn_tokens, run_shared_listener, SharedMail, ALPN_IMAP, ALPN_SMTP};
+use crate::shared_listener::{
+    alpn_tokens, load_mail_tls_configs, run_shared_listener, MailTlsConfigs, SharedMail, ALPN_IMAP,
+    ALPN_SMTP,
+};
 
 use chatmail_imap::ImapSessionConfig;
 use chatmail_iroh::IrohRelayHandle;
@@ -300,7 +303,7 @@ impl SupervisorInner {
         })
     }
 
-    fn load_tls_config(&self, addrs: &ResolvedAddrs) -> Result<Option<Arc<ServerConfig>>> {
+    fn load_tls_config(&self, addrs: &ResolvedAddrs) -> Result<Option<MailTlsConfigs>> {
         let runtime = RuntimeListeners {
             imap_plain_addr: addrs.imap_plain.clone(),
             imap_tls_addr: addrs.imap_tls.clone(),
@@ -317,13 +320,13 @@ impl SupervisorInner {
         }
         let (cert, key) =
             crate::tls_boot::ensure_tls_pem_files(&self.file_config, &self.state_dir)?;
-        Ok(Some(load_server_config(&cert, &key)?))
+        Ok(Some(load_mail_tls_configs(&cert, &key)?))
     }
 
     /// ALPN-advertising TLS config for the HTTPS port, when it also carries mail.
     ///
-    /// A separate `ServerConfig` on purpose: 993/465/587/143 clone the one from
-    /// [`Self::load_tls_config`] and must keep negotiating with no ALPN extension.
+    /// A separate `ServerConfig` on purpose: its token list depends on which
+    /// protocols the operator enabled, unlike the fixed per-port lists.
     fn load_shared_tls_config(&self, addrs: &ResolvedAddrs) -> Result<Option<Arc<ServerConfig>>> {
         let tokens = alpn_tokens(
             self.file_config.alpn_imap.is_some(),
@@ -434,7 +437,7 @@ impl SupervisorInner {
             addrs.smtp.clone(),
             smtp_cancel.clone(),
             None,
-            tls_config.clone(),
+            tls_config.as_ref().map(|t| t.no_alpn.clone()),
             Arc::clone(&self.app),
             self.pool.clone(),
             self.smtp_cfg.clone(),
@@ -446,7 +449,7 @@ impl SupervisorInner {
                 addr,
                 cancel.clone(),
                 None,
-                tls_config.clone(),
+                tls_config.as_ref().map(|t| t.no_alpn.clone()),
                 Arc::clone(&self.app),
                 self.pool.clone(),
                 self.submission_cfg.clone(),
@@ -457,8 +460,10 @@ impl SupervisorInner {
         let submission_tls_slot = addrs.submission_tls.map(|addr| {
             let cancel = CancellationToken::new();
             let tls = tls_config
-                .clone()
-                .expect("tls config when submission tls listen set");
+                .as_ref()
+                .expect("tls config when submission tls listen set")
+                .submission_tls
+                .clone();
             let join = spawn_smtp(
                 addr,
                 cancel.clone(),
@@ -477,7 +482,7 @@ impl SupervisorInner {
                 addr,
                 cancel.clone(),
                 None,
-                tls_config.clone(),
+                tls_config.as_ref().map(|t| t.no_alpn.clone()),
                 Arc::clone(&self.app),
                 self.pool.clone(),
                 imap_cfg.clone(),
@@ -488,8 +493,10 @@ impl SupervisorInner {
         let imap_tls_slot = addrs.imap_tls.map(|addr| {
             let cancel = CancellationToken::new();
             let tls = tls_config
-                .clone()
-                .expect("tls config when imap tls listen set");
+                .as_ref()
+                .expect("tls config when imap tls listen set")
+                .imap_tls
+                .clone();
             let join = spawn_imap(
                 addr,
                 cancel.clone(),
@@ -506,7 +513,7 @@ impl SupervisorInner {
         let (http_plain_slot, http_tls_slot) = self.spawn_http_listener_slots(
             addrs.http_plain.clone(),
             addrs.http_tls.clone(),
-            tls_config.as_ref(),
+            tls_config.as_ref().map(|t| &t.no_alpn),
             shared_tls.as_ref(),
             imap_cfg.clone(),
             http_extra,
@@ -714,7 +721,7 @@ impl SupervisorInner {
         let (http_plain_slot, http_tls_slot) = self.spawn_http_listener_slots(
             addrs.http_plain.clone(),
             addrs.http_tls.clone(),
-            tls_config.as_ref(),
+            tls_config.as_ref().map(|t| &t.no_alpn),
             shared_tls.as_ref(),
             imap_cfg,
             http_extra,
