@@ -89,6 +89,14 @@ with a fatal `no_application_protocol`:
 
 Built by `load_mail_tls_configs` in `crates/chatmail/src/shared_listener.rs`.
 
+On the shared HTTPS port, ALPN is also checked **before** the SNI hostname. That
+ordering is what makes hostname routing safe: SNI names a host rather than a
+protocol and a browser sets it from its URL bar, so consulting SNI first would send
+a visitor to `https://imap.example.org/` into the IMAP parser with no attacker
+involved. Browsers always offer ALPN in order to negotiate HTTP/2, so they are
+decided before the hostname is ever read. Tests: `p12_it07_alpn_outranks_sni`,
+`p12_ut20_configured_sni_replaces_the_prefix_default`.
+
 Two limits are deliberate. STARTTLS ports advertise nothing because the client
 negotiates TLS after a plaintext greeting and has no ClientHello to offer ALPN in.
 And a client that sends no ALPN extension is never rejected — rustls only fails
