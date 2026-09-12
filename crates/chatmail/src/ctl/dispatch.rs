@@ -144,7 +144,7 @@ fn not_implemented(cmd: &Command) -> Result<()> {
          Implemented: run, upgrade, update, version, admin-token, admin-web, install, certificate, \
          accounts, ban-list, blocklist, create-user, delete, registration, openrelay, language, \
          html-export, html-serve, html-migrate, webimap, websmtp, webmail-cors, push, federation, registration-tokens, sharing, \
-         status, uninstall, service, firewall, endpoint-cache, port, proxy, iroh, dkim, db, reload, message-size, tasks, queue, versions, completion"
+         monitor, status, uninstall, service, firewall, endpoint-cache, port, proxy, iroh, dkim, db, reload, message-size, tasks, queue, versions, completion"
     )))
 }
 
