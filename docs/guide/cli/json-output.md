@@ -135,6 +135,27 @@ Not applicable — server mode does not use ctl JSON output.
 
 `ports` and `server_tracker` are omitted when unavailable. Use `--details` to include `ports`.
 
+### `monitor`
+
+One envelope per sample (newline-delimited when `--count` is not 1):
+
+```json
+{
+  "ok": true,
+  "command": "monitor",
+  "data": {
+    "conns": { "imap": 4.0, "smtp": 2.0, "submission": 0.0, "total": 6.0 },
+    "messages_per_second": 19.88,
+    "aborted_per_second": 0.0,
+    "completed_total": 180.0,
+    "aborted_total": 5.0,
+    "queue_length": 3.0
+  }
+}
+```
+
+`messages_per_second` and `aborted_per_second` are `null` on the first sample, which has no previous sample to measure against. Metrics missing from the scrape read as `0`.
+
 ### `reload`
 
 ```json
