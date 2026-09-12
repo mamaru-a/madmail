@@ -85,10 +85,14 @@ async fn create_token(
         .transpose()?
         .map(format_sqlite_expires);
 
+    let sql = format!(
+        "INSERT INTO registration_tokens (token, max_uses, used_count, comment, expires_at)
+         VALUES (?, ?, 0, ?, {})",
+        pool.timestamp_param()
+    );
     db_execute!(
         pool,
-        "INSERT INTO registration_tokens (token, max_uses, used_count, comment, expires_at)
-         VALUES (?, ?, 0, ?, ?)",
+        &sql,
         token.as_str(),
         max_uses,
         comment,
@@ -130,7 +134,7 @@ async fn list_tokens(args: &Args, pool: &DbPool) -> Result<()> {
     let rows: Vec<TokenRow> = db_fetch_all!(
         pool,
         TokenRow,
-        "SELECT token, max_uses, used_count, comment, expires_at, created_at
+        "SELECT token, max_uses, used_count, comment, CAST(expires_at AS TEXT), CAST(created_at AS TEXT)
          FROM registration_tokens ORDER BY created_at DESC"
     )?;
 
@@ -212,7 +216,7 @@ async fn status_token(args: &Args, pool: &DbPool, token: &str) -> Result<()> {
     let t: TokenRow = db_fetch_optional!(
         pool,
         TokenRow,
-        "SELECT token, max_uses, used_count, comment, expires_at, created_at
+        "SELECT token, max_uses, used_count, comment, CAST(expires_at AS TEXT), CAST(created_at AS TEXT)
          FROM registration_tokens WHERE token = ?",
         token
     )?
