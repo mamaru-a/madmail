@@ -31,7 +31,13 @@ Set the **`A`/`AAAA` record before install** when using Let's Encrypt. Port **80
 
 | Type | Name | Value | Purpose |
 |------|------|-------|---------|
-| `MX` | mail domain (`example.org`) | `10 mail.example.org.` | SMTP **fallback** federation; classic inbound mail routing |
+| `MX` | mail domain (the part after `@`) | `10 <hostname>.` | SMTP fallback **and** inbound HTTP federation from classic chatmail (cmdeploy) |
+
+Point **MX at the same hostname that already serves HTTPS `/mxdeliv`** (the name you installed with and that has the certificate). That is the usual layout: one DNS name for users, TLS, the registration page, and MX.
+
+A second name such as `mail.chat.example.org` only works if it also has `A`/`AAAA`, a certificate that **matches that name**, and your reverse proxy answers `POST /mxdeliv` there. Otherwise cmdeploy peers (including nine.testrun.org) never hit the vhost you tested: they look up MX, then POST to `https://<MX-host>/mxdeliv` and check TLS against **that** host. Madmail’s own outbound still uses the address domain, so `federation status` can show Delivered (HTTPS) toward them while Secure Join hangs.
+
+In BIND, a trailing dot means “this is a fully qualified name.” `10 chat.example.org.` is correct. `10 mail.chat.` is the TLD `mail.chat`, not a subdomain of your zone.
 
 ### Optional (SMTP hygiene and deliverability)
 
@@ -68,19 +74,28 @@ Scripts can use `madmail dkim show --json` and read `data.txt` / `data.dns_fqdn`
 
 ## Federation vs SMTP authentication
 
-Chatmail servers (madmail, cmdeploy/Postfix+Dovecot, and others) prefer **HTTP federation**:
+Chatmail servers prefer **HTTP federation**, then SMTP on port 25.
+
+**Madmail outbound** (you → them) posts to the **address domain** (`user@this-name`):
 
 ```text
 POST https://<recipient-domain>/mxdeliv
 ```
 
-Fallback order: HTTPS → HTTP → SMTP (port 25).
+Madmail does not require the peer’s certificate to be publicly trusted (self-signed is OK).
 
-On the `/mxdeliv` path:
+**Inbound from classic chatmail** (cmdeploy / filtermail, including nine.testrun.org) looks up **MX** for that domain, then:
 
-- **PGP encryption** is enforced on Madmail inbound.
+```text
+POST https://<MX-host>/mxdeliv
+```
+
+Those peers **do** check that the TLS certificate matches `<MX-host>`. Point MX at the hostname you already `curl` for `405 Allow: POST`. Fallback on their side is SMTP `:25` to the same MX name (STARTTLS); that certificate should match too.
+
+On Madmail’s `/mxdeliv` path:
+
+- **PGP encryption** is enforced on inbound.
 - **Outbound** Madmail adds a DKIM signature (selector `default`) so **cmdeploy** peers do not return `400` / `554 5.7.1 No DKIM signature found`.
-- **TLS certificate trust between relays is not required** (self-signed certs are normal).
 - Inbound `dkim` / `spf` / `dmarc` checks in `madmail.conf` apply to mail arriving on **SMTP port 25**, not to Madmail `/mxdeliv`.
 
 Missing **DKIM TXT** can still fail **cmdeploy verification** after a signature is present. Publish `default._domainkey`. SPF/DMARC remain optional for chatmail-to-chatmail HTTP.
@@ -92,11 +107,13 @@ More detail: [Sending, Receiving, and Federation](./05-sending-receiving-and-fed
 From your laptop or another host on the internet:
 
 ```bash
-# Forward DNS
+# Forward DNS — MX of the address domain should be the HTTPS hostname
 dig +short mail.example.org A
-dig +short example.org MX
+dig +short mail.example.org MX
+# If users are @example.org instead, also: dig +short example.org MX
 
-# Federation endpoint reachable (405 or 400 is fine; timeout/refused is not)
+# Federation endpoint (405 or 400 is fine; timeout/refused is not).
+# If MX is a different name, curl that host as well — that is what cmdeploy posts to.
 curl -sI https://mail.example.org/mxdeliv
 ```
 
