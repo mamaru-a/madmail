@@ -1,3 +1,10 @@
+# [2.27.0](https://github.com/themadorg/madmail/compare/v2.26.0...v2.27.0) (2026-09-12)
+
+
+### Features
+
+* madmail db sqlite-to-postgres ([#160](https://github.com/themadorg/madmail/issues/160)) ([e3cc11e](https://github.com/themadorg/madmail/commit/e3cc11e8fc32af9f57f3dae7ba0956b690043e5f))
+
 # [2.26.0](https://github.com/themadorg/madmail/compare/v2.25.0...v2.26.0) (2026-08-25)
 
 
