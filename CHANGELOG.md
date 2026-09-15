@@ -1,3 +1,15 @@
+# [2.29.0](https://github.com/themadorg/madmail/compare/v2.28.0...v2.29.0) (2026-09-15)
+
+
+### Bug Fixes
+
+* **cli:** enable the openmetrics endpoint in the installer ([a099384](https://github.com/themadorg/madmail/commit/a099384c7bfcc736d9c561503a5284a767a9ce35))
+
+
+### Features
+
+* **cli:** add `madmail monitor` for live connection and throughput stats ([75acc67](https://github.com/themadorg/madmail/commit/75acc67de10d1a03e0137e26f5cf68924e9d8fc2)), closes [#19](https://github.com/themadorg/madmail/issues/19)
+
 # [2.28.0](https://github.com/themadorg/madmail/compare/v2.27.0...v2.28.0) (2026-09-15)
 
 
