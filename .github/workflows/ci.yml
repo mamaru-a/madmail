@@ -278,6 +278,7 @@ jobs:
         working-directory: landing
         run: |
           bun install --frozen-lockfile
+          bun run test
           bun run build
 
       - name: Upload GitHub Pages artifact
