@@ -59,6 +59,7 @@ Status: **done** · **planned** (parsed, `not_implemented`) · **defer**
 | `version` | [version.md](../guide/cli/version.md) | `version.rs` | **done** |
 | `reload` | [reload.md](../guide/cli/reload.md) | `reload.rs` | **done** |
 | `status` | [status.md](../guide/cli/status.md) | `status_cmd.rs` | **done** |
+| `monitor` | [monitor.md](../guide/cli/monitor.md) | `monitor.rs` | **done** |
 | `completion` | [completion.md](../guide/cli/completion.md) | `docs.rs` | **done** |
 | `admin-token` | [admin-token.md](../guide/cli/admin-token.md) | `admin_token.rs` | **done** |
 | `admin-web` | [admin-web.md](../guide/cli/admin-web.md) | `admin_web.rs` | **done** |
@@ -114,6 +115,7 @@ Status: **done** · **planned** (parsed, `not_implemented`) · **defer**
 | `version` | [version.md](../guide/cli/version.md) | `maddy.go` | **done** |
 | `reload` | [reload.md](../guide/cli/reload.md) | `ctl/reload_config.go` | **done** |
 | `status` | [status.md](../guide/cli/status.md) | `ctl/online.go` | **done** (`--details`) |
+| `monitor` | [monitor.md](../guide/cli/monitor.md) | — (v2; #19) | **done** (`--interval`, `--count`, `--addr`) |
 | `certificate` | [certificate.md](../guide/cli/certificate.md) | — (instant-acme) | **done** — `get`, `regenerate`, `status`, [`autocert`](../guide/cli/certificate-autocert.md) |
 | `db` | [db.md](../guide/cli/db.md) | — | **done** — `sqlite-to-postgres` |
 
