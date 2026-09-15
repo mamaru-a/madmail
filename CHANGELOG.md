@@ -1,3 +1,10 @@
+# [2.28.0](https://github.com/themadorg/madmail/compare/v2.27.0...v2.28.0) (2026-09-15)
+
+
+### Features
+
+* **metrics:** track concurrent IMAP and SMTP connections ([60aed77](https://github.com/themadorg/madmail/commit/60aed775fa8504052162907cd86a6902d65aa531)), closes [#19](https://github.com/themadorg/madmail/issues/19) [#19](https://github.com/themadorg/madmail/issues/19)
+
 # [2.27.0](https://github.com/themadorg/madmail/compare/v2.26.0...v2.27.0) (2026-09-12)
 
 
