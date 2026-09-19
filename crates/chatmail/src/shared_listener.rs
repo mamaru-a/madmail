@@ -466,6 +466,19 @@ mod tests {
 
     use super::*;
 
+    /// The listeners bind inside a spawned task, so poll until the port accepts
+    /// instead of sleeping a fixed time — under a loaded `cargo test --workspace`
+    /// a fixed 50 ms lost the race and the test saw `ConnectionRefused`.
+    async fn wait_until_listening(addr: std::net::SocketAddr) {
+        for _ in 0..200 {
+            if tokio::net::TcpStream::connect(addr).await.is_ok() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        panic!("listener never came up on {addr}");
+    }
+
     fn test_imap_cfg() -> ImapSessionConfig {
         ImapSessionConfig {
             hostname: "imap.test".into(),
@@ -570,7 +583,7 @@ mod tests {
                 run_shared_listener(&addr.to_string(), bg, Arc::new(server), Router::new(), mail)
                     .await;
         });
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        wait_until_listening(addr).await;
 
         Harness {
             addr,
@@ -750,7 +763,7 @@ mod tests {
             )
             .await;
         });
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        wait_until_listening(addr).await;
         (addr, roots, cancel)
     }
 
@@ -1016,7 +1029,7 @@ mod tests {
             )
             .await;
         });
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        wait_until_listening(addr).await;
 
         Harness {
             addr,
