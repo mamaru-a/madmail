@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Prepare a madmail host so the high-DPI smoke test has something to measure.
 #
-# Run this ON THE SERVER, as root, once. It only prints what it would change
-# unless --apply is given.
+# Run this ON THE SERVER. It is a checklist: it reads the config and DNS and
+# prints the commands to run. It changes nothing — the config is yours, and the
+# commands below are explicit on purpose.
 #
 # Usage:
-#   ./server-setup.sh --domain mail.example.org            # check only
-#   ./server-setup.sh --domain mail.example.org --apply
-#   ./server-setup.sh --domain mail.example.org --apply --with-sni
+#   ./server-setup.sh --domain mail.example.org
+#   ./server-setup.sh --domain mail.example.org --with-sni
 #
 # --with-sni also prepares the stock-client path (SNI routing), which needs a
 # certificate covering imap.<domain> / smtp.<domain>. `madmail install` asks
@@ -16,14 +16,12 @@
 set -euo pipefail
 
 DOMAIN=""
-APPLY=0
 WITH_SNI=0
 CONF="${MADMAIL_CONF:-/etc/madmail/madmail.conf}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --domain) DOMAIN="$2"; shift 2 ;;
-    --apply) APPLY=1; shift ;;
     --with-sni) WITH_SNI=1; shift ;;
     --conf) CONF="$2"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
@@ -32,7 +30,6 @@ done
 [[ -n "$DOMAIN" ]] || { echo "--domain is required" >&2; exit 2; }
 
 say() { printf '\n== %s\n' "$*"; }
-would() { if [[ $APPLY -eq 1 ]]; then echo "-> $*"; else echo "   would: $*"; fi; }
 
 say "1. Config block"
 # The installer has always emitted alpn_imap / alpn_smtp; before #173 they were
@@ -101,8 +98,5 @@ echo "   Run probe.py from an unfiltered host FIRST and keep the JSON:"
 echo "     ./probe.py --host $DOMAIN --label control --json control.json"
 echo "   Then run it from the network under test and diff the two."
 
-if [[ $APPLY -eq 1 ]]; then
-  say "Apply mode"
-  would "restart madmail so config changes take effect: systemctl restart madmail"
-  echo "   (Nothing was edited automatically — the config is yours; the commands above are explicit on purpose.)"
-fi
+say "6. After any config change"
+echo "   systemctl restart madmail"

@@ -42,23 +42,32 @@ def rand(n: int = 9) -> str:
     return "".join(random.choices(string.ascii_lowercase + string.digits, k=n))
 
 
-def login_uri(domain: str, ip: str, port: int) -> str:
+def login_uri(domain: str, ip: str, port: int, insecure_lab: bool = False) -> str:
     """A dclogin URI pinned to one port for both IMAP and submission.
 
     Pinning is the whole point: `dcaccount:` would let the client fall back to
     993/465 and we would not learn whether 443 works.
+
+    Certificates are checked strictly by default. The lab scenarios in
+    tests/deltachat-test pass `ic=3` (accept invalid certificates) because they
+    dial a container by IP, but a probe whose subject is a network that may
+    intercept TLS must not do that — an interceptor would show up as a pass.
+    `--insecure-lab` restores the lab behaviour explicitly.
     """
     user, password = rand(), rand(20)
-    return (
+    host = ip if insecure_lab else domain
+    uri = (
         f"dclogin:{user}@{domain}/?p={urllib.parse.quote(password, safe='')}&v=1"
-        f"&ih={ip}&ip={port}&is=ssl"
-        f"&sh={ip}&sp={port}&ss=ssl&ic=3"
+        f"&ih={host}&ip={port}&is=ssl"
+        f"&sh={host}&sp={port}&ss=ssl"
     )
+    return uri + "&ic=3" if insecure_lab else uri
 
 
-def configure(dc: DeltaChat, domain: str, ip: str, port: int, label: str, timeout: int):
+def configure(dc: DeltaChat, domain: str, ip: str, port: int, label: str, timeout: int,
+              insecure_lab: bool = False):
     acc = dc.add_account()
-    acc.set_config_from_qr(login_uri(domain, ip, port))
+    acc.set_config_from_qr(login_uri(domain, ip, port, insecure_lab))
     acc.set_config("displayname", f"highdpi-smoke {label}")
     t0 = time.monotonic()
     acc.configure()
@@ -82,6 +91,8 @@ def main() -> int:
     ap.add_argument("--port", type=int, default=443, help="port for both IMAP and submission (default 443)")
     ap.add_argument("--idle-seconds", type=int, default=300, help="how long to hold IMAP idle after the round trip")
     ap.add_argument("--timeout", type=int, default=120, help="per-account configure timeout")
+    ap.add_argument("--insecure-lab", action="store_true",
+                    help="dial the IP and accept invalid certificates (local lab only, never on a real network)")
     args = ap.parse_args()
 
     ip = args.ip or socket.gethostbyname(args.domain)
@@ -89,8 +100,8 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory() as tmp, Rpc(accounts_dir=tmp) as rpc:
         dc = DeltaChat(rpc)
-        alice = configure(dc, args.domain, ip, args.port, "alice", args.timeout)
-        bob = configure(dc, args.domain, ip, args.port, "bob", args.timeout)
+        alice = configure(dc, args.domain, ip, args.port, "alice", args.timeout, args.insecure_lab)
+        bob = configure(dc, args.domain, ip, args.port, "bob", args.timeout, args.insecure_lab)
 
         chat = alice.create_chat(bob)
         text = f"highdpi-smoke {rand(6)}"

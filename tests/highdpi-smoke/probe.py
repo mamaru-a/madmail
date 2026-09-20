@@ -255,6 +255,12 @@ def tier_a(host: str, ip: str, rep: Report, timeout: float) -> None:
         rep.results.append(Result(scenario, what, expected, p, verdict, note))
         return p
 
+    def skip(scenario, what, expected, p, _ok_outcomes, note=""):
+        rep.results.append(
+            Result(scenario, what, expected, Probe(SKIP, p.detail or p.payload), "SKIP", note)
+        )
+        return p
+
     # A1 — which ports are reachable at all. TCP only, no TLS.
     for port in sorted({*PORTS.values(), *EXTRA_PORTS}):
         t0 = time.monotonic()
@@ -278,6 +284,23 @@ def tier_a(host: str, ip: str, rep: Report, timeout: float) -> None:
                 "TCP_TIMEOUT here and TCP_OPEN on the control network = the port is filtered",
             )
         )
+
+    # A0 — does the certificate verify against the system roots? On a network
+    # that intercepts TLS this is the single most important result, and it
+    # decides whether tier C may be run at all.
+    sans, why = cert_sans(ip, PORTS["shared"], host)
+    rep.cert_sans = sans
+    rep.results.append(
+        Result(
+            "A0",
+            f"certificate on :{PORTS['shared']} verifies for {host}",
+            "valid chain and matching name",
+            Probe("CERT_OK" if sans else TLS_CERT_MISMATCH, why or ", ".join(sans)),
+            "PASS" if sans else "FAIL",
+            "FAIL here with PASS on the control network means TLS is being "
+            "intercepted — do not run tier C on this network",
+        )
+    )
 
     # A2 — the feature itself: ALPN imap on the HTTPS port.
     add(
@@ -329,8 +352,6 @@ def tier_a(host: str, ip: str, rep: Report, timeout: float) -> None:
 
     # A6/A7 — the stock-client paths added on top of ALPN. Both need the
     # certificate to cover the hostname the client dials, so check that first.
-    sans, why = cert_sans(ip, PORTS["shared"], host)
-    rep.cert_sans = sans
     has_imap_san = any(n in (f"imap.{host}", f"*.{host}") for n in sans)
     if has_imap_san:
         add(
@@ -353,8 +374,11 @@ def tier_a(host: str, ip: str, rep: Report, timeout: float) -> None:
             )
         )
 
-    # A7 — first bytes: an early talker on a name that selects nothing.
-    add(
+    # A7 — first bytes: an early talker on a name that selects nothing. A host
+    # whose own first label is imap. or smtp. IS a mail name under the prefix
+    # rule, so there is no neutral name to test with.
+    neutral = not host.split(".")[0].lower() in ("imap", "smtp")
+    (add if neutral else skip)(
         "A7",
         f"{PORTS['shared']}, no ALPN, neutral SNI, early EHLO",
         "SMTP banner (first-bytes path)",
@@ -507,7 +531,9 @@ def tier_c(host: str, rep: Report, user: str, password: str, idle_seconds: int, 
         try:
             greeting = tls.recv(512).decode("utf-8", "replace").strip()
             resp = _imap_cmd(tls, "a1", f'LOGIN "{user}" "{password}"')
-            ok = " OK " in resp or resp.strip().endswith("OK")
+            # Only the tagged completion line decides; an untagged `* OK …`
+            # can share a read with `a1 NO …`.
+            ok = "a1 OK" in resp
             rep.results.append(
                 Result(
                     label,

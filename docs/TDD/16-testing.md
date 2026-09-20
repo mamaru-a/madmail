@@ -122,7 +122,7 @@ Rules that make the output meaningful:
   certbot cert with the extra SANs — see `server-setup.sh`.
 
 The harness is validated against a local instance on high ports (recipe in the
-README); a correct build gives 12 PASS / 0 FAIL in tier A.
+README); a correct build gives 13 PASS / 0 FAIL in tier A.
 
 ## Continuous Integration
 - GitHub Actions:

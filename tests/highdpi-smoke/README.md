@@ -46,13 +46,14 @@ Exit code is 1 if any scenario failed, so it drops into a cron or CI step.
 
 | # | Scenario | Expected |
 |---|---|---|
+| A0 | Certificate on 443 verifies against system roots | valid chain, matching name — a FAIL here that passes on the control is TLS interception |
 | A1 | TCP connect to 443, 993, 465, 587, 143, 25, 80 | recorded, not judged — the control tells you which are filtered |
 | A2 | 443, ALPN `imap` | IMAP greeting |
 | A3 | 443, ALPN `smtp` | SMTP banner |
 | A4 | 443, no ALPN, HTTP request line | HTTP response — an unidentified connection must never reach a mail parser |
 | A5 | 443, ALPN `h2` only | handshake refused (alert 120) |
 | A6 | 443, no ALPN, SNI `imap.<domain>` | IMAP greeting — SKIP unless the certificate covers that name |
-| A7 | 443, no ALPN, neutral SNI, early `EHLO` | SMTP banner (first-bytes path) |
+| A7 | 443, no ALPN, neutral SNI, early `EHLO` | SMTP banner (first-bytes path) — SKIP if the host's own first label is `imap.`/`smtp.`, since then no neutral name exists |
 | A8 | 993 / 465, no ALPN | greeting — strict ALPN must not lock out Thunderbird or Apple Mail |
 | A9 | 993 / 465, matching ALPN | greeting |
 | A10 | 993 / 465, browser ALPN | refused (cross-protocol hardening) |
@@ -71,6 +72,11 @@ Each result is classified by *why* it failed, which is the point:
 
 `TLS_ALPN_REFUSED` is confirmed by retrying the same handshake without the ALPN
 extension, because OpenSSL 3.0.x reports alert 120 as `[SSL] unknown error`.
+
+That inference names the *cause*, not the author: a middlebox that forges TLS
+alerts produces the same shape. `TLS_ALPN_REFUSED` on A2 or A3 — where the server
+is supposed to accept the token — means the alert came from the network, not the
+server. The control run settles it.
 
 ## Tier B — is the ClientHello itself punished?
 
@@ -103,6 +109,8 @@ MADMAIL_SMOKE_USER=you@example.org MADMAIL_SMOKE_PASS=… \
 - **C1** IMAP LOGIN on 443 and on 993.
 - **C2** holds IMAP IDLE for `--idle-seconds`. A drop here means push and
   new-mail notifications die on this network even though login worked.
+- If A0 failed on this network, stop: tier C would carry credentials through
+  whatever is terminating TLS.
 - **C3** uploads 16 KB and 512 KB through submission on 443 and reports KB/s.
   A chatmail relay answers cleartext mail with `523 5.7.1 Encryption Needed`
   *after* the body is uploaded; that counts as a successful upload, since the
@@ -124,6 +132,10 @@ Configures two accounts pinned to one port, sends a message between them, then
 holds idle. This is the only tier that exercises the client's own retry and
 fallback behaviour.
 
+Certificates are verified strictly. `--insecure-lab` (dial the IP, accept invalid
+certificates, as the LXC scenarios do) exists for a local instance only — on a
+real network it would report a pass straight through an interceptor.
+
 ## Lab run without a filtered network
 
 The harness itself was validated this way, and it is how you check a change to
@@ -137,7 +149,7 @@ openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem -days 2 
 cat > madmail.conf <<'EOF'
 hostname localhost
 primary_domain localhost
-tls file ./cert.pem ./key.pem
+tls file /absolute/path/cert.pem /absolute/path/key.pem
 smtp tcp://127.0.0.1:2525 { }
 submission tls://127.0.0.1:14465 tcp://127.0.0.1:11587 { }
 imap tls://127.0.0.1:14993 tcp://127.0.0.1:11143 { }
@@ -156,7 +168,8 @@ madmail accounts create smoke -p 'lab-pass' --config ./madmail.conf --state-dir 
   --shared-port 14443 --imap-port 14993 --submission-port 14465 --cafile ./cert.pem
 ```
 
-Expected on a correct build: 12 PASS, 0 FAIL in tier A.
+Paths in `tls file` must be absolute. Expected on a correct build: 13 PASS,
+0 FAIL in tier A.
 
 ## Reading the result
 
@@ -164,6 +177,8 @@ Expected on a correct build: 12 PASS, 0 FAIL in tier A.
 |---|---|---|
 | A2 PASS, 993 open | A2 PASS, 993 `TCP_TIMEOUT` | The feature works and is doing its job |
 | A2 PASS | A2 `TLS_RESET`, browser rows fine | The mail ClientHello is being singled out |
+| A0 PASS | A0 FAIL | TLS is being intercepted; stop before tier C |
+| A2 PASS | A2 `TLS_ALPN_REFUSED` | The alert is forged by the network — the server accepts that token |
 | A2 PASS | everything `TCP_TIMEOUT` incl. 443 | The host is blocked outright; the shared port cannot help |
 | A2 PASS | A2 PASS, C2 drops in minutes | Reachable but idle connections are reaped — push is the casualty |
 | A2 FAIL on both | — | Server configuration, not the network. See `server-setup.sh` |
