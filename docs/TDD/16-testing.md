@@ -96,6 +96,34 @@ Replicate and extend the existing Python test suite (`tests/deltachat-test/`).
 - Federation policy bypass attempts (subdomains, IP literals, case)
 - PGP structure fuzzing / malformed messages
 
+## 6. Network-Condition Smoke Test (manual, off-CI)
+
+The shared-port demux (443 serving HTTPS + IMAP + submission) exists for networks
+that block 993/465 and inspect TLS. CI cannot exercise that: it needs a client
+sitting on such a network, so it is a manual run with a control.
+
+[`tests/highdpi-smoke/`](../../tests/highdpi-smoke/README.md) holds the harness:
+
+| Tier | What it establishes |
+|------|---------------------|
+| A | Which ports are reachable, and that the demux routes ALPN / SNI / first bytes correctly — classifying failures as blocked port, reset after ClientHello, alert 120, or cert mismatch |
+| B | Whether a given ClientHello shape is singled out, by comparing kill rates across seven shapes against the same IP and minute |
+| C | Authenticated IMAP LOGIN, IMAP IDLE survival over minutes, and submission upload throughput |
+| D | A real Delta Chat client pinned to `:443` (`deltachat-rpc-client`) |
+
+Rules that make the output meaningful:
+
+- Always pair a run on the network under test with a control run from an
+  unfiltered host; a lone report cannot separate filtering from misconfiguration.
+- Tiers A and B accept any certificate on purpose (they measure routing); tier C
+  verifies it, because credentials travel on that socket.
+- `A6` (SNI routing) reports SKIP unless the certificate covers `imap.<domain>`.
+  `madmail install` orders a single-name certificate, so that path needs a
+  certbot cert with the extra SANs — see `server-setup.sh`.
+
+The harness is validated against a local instance on high ports (recipe in the
+README); a correct build gives 12 PASS / 0 FAIL in tier A.
+
 ## Continuous Integration
 - GitHub Actions:
   - `cargo test`
