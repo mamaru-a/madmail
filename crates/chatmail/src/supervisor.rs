@@ -31,7 +31,6 @@ use chatmail_imap::run_imap_listener;
 use chatmail_smtp::run_smtp_listener;
 use chatmail_state::{AppState, ReloadRequest, ReloadScope};
 use chatmail_tasks::MaintenanceHandle;
-use chatmail_tls::load_server_config_with_alpn;
 use chatmail_types::Result;
 use rustls::ServerConfig;
 use tokio::net::TcpListener;
@@ -44,8 +43,8 @@ use tracing::{error, info};
 use crate::logging::boot_error;
 use crate::servers::{build_http_extra, extend_dev_local_aliases};
 use crate::shared_listener::{
-    alpn_tokens, load_mail_tls_configs, run_shared_listener, MailTlsConfigs, SharedMail, SniPolicy,
-    ALPN_IMAP, ALPN_SMTP,
+    load_mail_tls_configs, run_shared_listener, MailTlsConfigs, SharedMail, SharedTlsConfigs,
+    SniPolicy, ALPN_IMAP, ALPN_SMTP,
 };
 
 use chatmail_imap::ImapSessionConfig;
@@ -323,16 +322,23 @@ impl SupervisorInner {
         Ok(Some(load_mail_tls_configs(&cert, &key)?))
     }
 
-    /// ALPN-advertising TLS config for the HTTPS port, when it also carries mail.
+    /// ALPN-advertising TLS configs for the HTTPS port, when it also carries mail.
     ///
-    /// A separate `ServerConfig` on purpose: its token list depends on which
-    /// protocols the operator enabled, unlike the fixed per-port lists.
-    fn load_shared_tls_config(&self, addrs: &ResolvedAddrs) -> Result<Option<Arc<ServerConfig>>> {
-        let tokens = alpn_tokens(
-            self.file_config.alpn_imap.is_some(),
-            self.file_config.alpn_smtp.is_some(),
-        );
-        if tokens.is_empty() || addrs.http_tls.is_none() {
+    /// Separate `ServerConfig`s on purpose: the token list depends on which
+    /// protocols are enabled *right now*, and an admin toggle can change that
+    /// without a restart, so the listener picks one per connection.
+    ///
+    /// The demux is spawned whenever the config file carries the directives, even
+    /// if both protocols are currently switched off — that is what lets an operator
+    /// switch them back on live. A server whose config has no `chatmail` block at
+    /// all keeps a plain HTTPS listener, and the admin API says a restart is needed.
+    fn load_shared_tls_config(
+        &self,
+        addrs: &ResolvedAddrs,
+    ) -> Result<Option<Arc<SharedTlsConfigs>>> {
+        let configured =
+            self.file_config.alpn_imap.is_some() || self.file_config.alpn_smtp.is_some();
+        if (!configured && !self.app.shared_port.any()) || addrs.http_tls.is_none() {
             return Ok(None);
         }
         // Configs written by older installers carry `alpn_smtp submission`, which was
@@ -362,8 +368,7 @@ impl SupervisorInner {
         }
         let (cert, key) =
             crate::tls_boot::ensure_tls_pem_files(&self.file_config, &self.state_dir)?;
-        let refs: Vec<&[u8]> = tokens.iter().map(|t| t.as_slice()).collect();
-        Ok(Some(load_server_config_with_alpn(&cert, &key, &refs)?))
+        Ok(Some(Arc::new(SharedTlsConfigs::load(&cert, &key)?)))
     }
 
     async fn start_listeners(&self) -> Result<()> {
@@ -372,10 +377,6 @@ impl SupervisorInner {
         let shared_tls = self.load_shared_tls_config(&addrs)?;
         let imap_cfg = self.imap_cfg.lock().await.clone();
 
-        self.app.listener_ports.set_shared_alpn(
-            self.file_config.alpn_imap.is_some(),
-            self.file_config.alpn_smtp.is_some(),
-        );
         self.app.listener_ports.set_runtime(
             &addrs.smtp,
             addrs.imap_plain.clone(),
@@ -630,7 +631,7 @@ impl SupervisorInner {
         http_plain: Option<String>,
         http_tls: Option<String>,
         tls_config: Option<&Arc<ServerConfig>>,
-        shared_tls: Option<&Arc<ServerConfig>>,
+        shared_tls: Option<&Arc<SharedTlsConfigs>>,
         imap_cfg: ImapSessionConfig,
         http_extra: Option<Router>,
     ) -> (Option<ListenerSlot>, Option<ListenerSlot>) {
@@ -654,6 +655,7 @@ impl SupervisorInner {
             // With ALPN configured this port carries IMAP and submission too, so the
             // demux takes the slot rather than running as a fourth listener on 443 —
             // preflight would otherwise bind the same address twice and fail boot.
+            self.app.shared_port.set_demux_active(shared_tls.is_some());
             let join = match shared_tls.cloned() {
                 Some(tls) => spawn_shared(
                     addr,
@@ -671,8 +673,7 @@ impl SupervisorInner {
                         pool: self.pool.clone(),
                         imap: imap_cfg.clone(),
                         submission: self.submission_cfg.clone(),
-                        alpn_imap: self.file_config.alpn_imap.is_some(),
-                        alpn_smtp: self.file_config.alpn_smtp.is_some(),
+                        flags: Arc::clone(&self.app.shared_port),
                         sni: SniPolicy {
                             imap: self.file_config.sni_imap.clone(),
                             smtp: self.file_config.sni_smtp.clone(),
@@ -876,7 +877,7 @@ fn spawn_imap(
 fn spawn_shared(
     addr: String,
     cancel: CancellationToken,
-    tls: Arc<ServerConfig>,
+    tls: Arc<SharedTlsConfigs>,
     router: Router,
     mail: SharedMail,
 ) -> JoinHandle<()> {

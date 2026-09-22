@@ -135,6 +135,9 @@ pub async fn all_settings(st: &AdminState, method: &str) -> AdminResult {
         "allow_inbound_remote_rcpt".into(),
         json!(get_toggle_disabled_default(pool, settings_keys::ALLOW_INBOUND_REMOTE_RCPT).await?),
     );
+    // Live flags, so the panel shows what the listener is actually doing.
+    body.insert("shared_port_imap".into(), json!(st.app.shared_port.imap()));
+    body.insert("shared_port_smtp".into(), json!(st.app.shared_port.smtp()));
 
     insert_setting(
         &mut body,
@@ -471,6 +474,16 @@ enum NamedKind {
     Value,
     /// GET status + POST enable|disable (admin-web `setToggle` on `registration_token_required`).
     DbToggleDefaultDisabled,
+    /// Mail on the shared HTTPS port. Same wire shape as `DbToggleDefaultDisabled`,
+    /// but the default is the config file's `alpn_*` directive rather than a
+    /// constant, so the answer comes from the live flag.
+    SharedPort(SharedProto),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SharedProto {
+    Imap,
+    Smtp,
 }
 
 struct NamedRoute {
@@ -544,6 +557,20 @@ fn named_routes() -> HashMap<&'static str, NamedRoute> {
             kind: NamedKind::DbToggleDefaultDisabled,
         },
     );
+    m.insert(
+        "shared_port_imap",
+        NamedRoute {
+            db_key: k::SHARED_PORT_IMAP,
+            kind: NamedKind::SharedPort(SharedProto::Imap),
+        },
+    );
+    m.insert(
+        "shared_port_smtp",
+        NamedRoute {
+            db_key: k::SHARED_PORT_SMTP,
+            kind: NamedKind::SharedPort(SharedProto::Smtp),
+        },
+    );
     m
 }
 
@@ -572,6 +599,69 @@ pub async fn named_setting(
         NamedKind::DbToggleDefaultDisabled => {
             db_toggle_setting(st, method, body, route.db_key, false).await
         }
+        NamedKind::SharedPort(proto) => {
+            shared_port_setting(st, method, body, route.db_key, proto).await
+        }
+    }
+}
+
+/// `/admin/settings/shared_port_imap` and `…_smtp` — serve mail on the HTTPS port.
+///
+/// The listener reads these flags once per connection and picks the matching TLS
+/// config, so a change applies to the next connection without a restart. The one
+/// case it cannot cover is a config file with no `chatmail tls://…` block: then
+/// the HTTPS port is a plain listener and there is nothing to route, so the reply
+/// says `restart_required` rather than pretending the switch did something.
+async fn shared_port_setting(
+    st: &AdminState,
+    method: &str,
+    body: &Value,
+    db_key: &str,
+    proto: SharedProto,
+) -> AdminResult {
+    let flags = &st.app.shared_port;
+    let read = |p: SharedProto| match p {
+        SharedProto::Imap => flags.imap(),
+        SharedProto::Smtp => flags.smtp(),
+    };
+    let reply = |on: bool| {
+        let mut out = json!({ "status": if on { "enabled" } else { "disabled" } });
+        if !flags.demux_active() {
+            out["restart_required"] = json!(true);
+            out["detail"] = json!(
+                "the HTTPS port is not multiplexing mail; add a `chatmail tls://…` \
+                 block with alpn_imap / alpn_smtp and restart"
+            );
+        }
+        Ok((200, Some(out)))
+    };
+
+    match method {
+        "GET" => reply(read(proto)),
+        "POST" => {
+            let req: SettingActionBody =
+                serde_json::from_value(body.clone()).map_err(|e| (400, e.to_string()))?;
+            let on = match req.action.to_ascii_lowercase().as_str() {
+                "enable" => true,
+                "disable" => false,
+                "set" => parse_bool_str(&body_value_as_string(&req.value)),
+                _ => {
+                    return Err((
+                        400,
+                        format!("invalid action: {} (expected enable|disable)", req.action),
+                    ));
+                }
+            };
+            set_setting(&st.pool, db_key, if on { "true" } else { "false" })
+                .await
+                .map_err(db_err)?;
+            match proto {
+                SharedProto::Imap => flags.set_imap(on),
+                SharedProto::Smtp => flags.set_smtp(on),
+            }
+            reply(on)
+        }
+        _ => Err((405, format!("method {method} not allowed"))),
     }
 }
 

@@ -604,6 +604,82 @@ async fn admin_settings_appendlimit_updates_effective() {
     assert_eq!(st.app.message_size.effective(), 10 * 1024 * 1024);
 }
 
+/// P12-UT21: the toggle flips the live flag, not just a DB row — the listener
+/// reads the flag per connection, so this is what makes it apply without a restart.
+#[tokio::test]
+async fn admin_shared_port_toggle_updates_live_flags() {
+    let config = AppConfig {
+        alpn_imap: Some("imap".into()),
+        ..Default::default()
+    };
+    let (st, _dir) = test_state("secret-token-01234567890123456789012345678901", config).await;
+    assert!(st.app.shared_port.imap(), "directive is the default");
+    assert!(!st.app.shared_port.smtp());
+
+    let (code, body) = resources::dispatch(
+        &st,
+        "POST",
+        "/admin/settings/shared_port_imap",
+        &json!({ "action": "disable" }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(code, 200);
+    assert_eq!(body.unwrap()["status"], "disabled");
+    assert!(!st.app.shared_port.imap(), "disable must apply live");
+
+    let (_, body) = resources::dispatch(
+        &st,
+        "POST",
+        "/admin/settings/shared_port_smtp",
+        &json!({ "action": "enable" }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(body.unwrap()["status"], "enabled");
+    assert!(st.app.shared_port.smtp(), "enable must apply live");
+    assert!(!st.app.shared_port.imap(), "protocols stay independent");
+
+    // Survives a rehydrate: the override was persisted, not only set in memory.
+    st.app.shared_port.set_imap(true);
+    st.app.hydrate(&st.pool, &st.file_config).await.unwrap();
+    assert!(!st.app.shared_port.imap(), "DB override wins after reload");
+    assert!(st.app.shared_port.smtp());
+}
+
+/// P12-UT22: with no `chatmail` block the HTTPS port is a plain listener, so the
+/// reply must say a restart is needed rather than imply the switch took effect.
+#[tokio::test]
+async fn admin_shared_port_reports_restart_when_demux_inactive() {
+    let (st, _dir) = test_state(
+        "secret-token-01234567890123456789012345678901",
+        AppConfig::default(),
+    )
+    .await;
+    let (_, body) = resources::dispatch(&st, "GET", "/admin/settings/shared_port_imap", &json!({}))
+        .await
+        .unwrap();
+    let body = body.unwrap();
+    assert_eq!(body["status"], "disabled");
+    assert_eq!(body["restart_required"], json!(true));
+
+    st.app.shared_port.set_demux_active(true);
+    let (_, body) = resources::dispatch(
+        &st,
+        "POST",
+        "/admin/settings/shared_port_imap",
+        &json!({ "action": "enable" }),
+    )
+    .await
+    .unwrap();
+    let body = body.unwrap();
+    assert_eq!(body["status"], "enabled");
+    assert!(
+        body.get("restart_required").is_none(),
+        "a running demux applies the change live"
+    );
+}
+
 #[tokio::test]
 async fn p9_federation_silent_dismiss_crud() {
     let (st, _dir) = test_state(

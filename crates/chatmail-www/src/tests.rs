@@ -626,7 +626,8 @@ async fn p12_it03_mail_autoconfig_advertises_https_alpn_when_configured() {
     cfg.alpn_smtp = Some("smtp".into());
 
     let app_state = Arc::new(AppState::new(dir.path(), pool.clone()));
-    app_state.listener_ports.set_shared_alpn(true, true);
+    app_state.shared_port.set_imap(true);
+    app_state.shared_port.set_smtp(true);
     app_state.listener_ports.set_runtime(
         "0.0.0.0:25",
         None,
@@ -655,6 +656,86 @@ async fn p12_it03_mail_autoconfig_advertises_https_alpn_when_configured() {
     assert!(xml.contains("<port>993</port>"));
     assert!(xml.contains("<port>465</port>"));
     assert_eq!(xml.matches("<port>443</port>").count(), 2);
+}
+
+/// P12-IT10: what we advertise to clients follows the live toggle.
+///
+/// Autoconfig is the half that is easy to forget when a protocol is switched off:
+/// a client that keeps being told to use 443 would go on dialling a port that no
+/// longer serves it. The handler therefore reads the flags rather than a snapshot
+/// taken at boot, and this drives the real served XML to prove it.
+#[tokio::test]
+async fn p12_it10_autoconfig_follows_the_live_shared_port_toggle() {
+    use axum::body::to_bytes;
+    use axum::http::{Request, StatusCode};
+    use tower::ServiceExt;
+
+    let pool = init_memory_db().await.unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let mut cfg = AppConfig::default();
+    cfg.mail_domain = Some("example.org".into());
+    cfg.imap_tls_listen = Some("0.0.0.0:993".into());
+    cfg.submission_tls_listen = Some("0.0.0.0:465".into());
+    cfg.http_tls_listen = Some("0.0.0.0:443".into());
+    cfg.alpn_imap = Some("imap".into());
+    cfg.alpn_smtp = Some("smtp".into());
+
+    let app_state = Arc::new(AppState::new(dir.path(), pool.clone()));
+    app_state.listener_ports.set_runtime(
+        "0.0.0.0:25",
+        None,
+        Some("0.0.0.0:993".into()),
+        None,
+        Some("0.0.0.0:465".into()),
+        None,
+        Some("0.0.0.0:443".into()),
+    );
+    let app = crate::www_router(crate::WwwState::new(
+        pool,
+        Arc::clone(&app_state),
+        cfg,
+        dir.path(),
+    ));
+
+    let fetch = |app: axum::Router| async move {
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/.well-known/autoconfig/mail/config-v1.1.xml")
+                    .header("host", "example.org")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let bytes = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        String::from_utf8_lossy(&bytes).into_owned()
+    };
+
+    app_state.shared_port.set_imap(true);
+    app_state.shared_port.set_smtp(true);
+    assert_eq!(
+        fetch(app.clone()).await.matches("<port>443</port>").count(),
+        2,
+        "both protocols advertised while enabled"
+    );
+
+    app_state.shared_port.set_imap(false);
+    let xml = fetch(app.clone()).await;
+    assert_eq!(
+        xml.matches("<port>443</port>").count(),
+        1,
+        "the disabled protocol must stop being advertised"
+    );
+
+    app_state.shared_port.set_smtp(false);
+    let xml = fetch(app).await;
+    assert!(
+        !xml.contains("<port>443</port>"),
+        "nothing on 443 once both are off"
+    );
+    assert!(xml.contains("<port>993</port>"), "dedicated ports remain");
 }
 
 /// Contact sharing: POST /share persists to sharing.db; GET /{slug} renders contact page.

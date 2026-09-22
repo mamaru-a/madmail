@@ -25,6 +25,7 @@ pub mod message_size;
 pub mod policy;
 pub mod quota;
 pub mod reload;
+pub mod shared_port;
 pub mod silent_dismiss;
 pub mod tracker;
 
@@ -48,6 +49,7 @@ pub use message_size::MessageSizeLimit;
 pub use policy::{FederationPolicyCache, PolicyMode};
 pub use quota::QuotaCache;
 pub use reload::{ReloadRequest, ReloadScope};
+pub use shared_port::SharedPortFlags;
 pub use silent_dismiss::FederationSilentDismissCache;
 pub use tracker::{FederationTracker, ServerStat};
 
@@ -69,6 +71,8 @@ pub struct AppState {
     pub push: Arc<PushNotifier>,
     /// Bound listener ports (IMAP, etc.) for admin status / `ss` probes.
     pub listener_ports: Arc<ListenerPortsStore>,
+    /// Which mail protocols the HTTPS port also serves (admin-toggleable).
+    pub shared_port: Arc<SharedPortFlags>,
     /// Per-user mutexes so concurrent JIT logins coalesce on one DB create.
     pub jit_flights: Arc<DashMap<String, Arc<Mutex<()>>>>,
 }
@@ -110,6 +114,7 @@ impl AppState {
             federation_policy: Arc::new(FederationPolicyCache::new()),
             federation_silent_dismiss: Arc::new(FederationSilentDismissCache::new()),
             inbound_remote_rcpt: Arc::new(InboundRemoteRcptFlag::new(config)),
+            shared_port: Arc::new(SharedPortFlags::new(config)),
             mailbox_store: Arc::new(MailboxStore::with_policy(
                 state_dir,
                 StoragePolicy::from_config(
@@ -163,6 +168,7 @@ impl AppState {
         self.federation_policy.hydrate(pool).await?;
         self.federation_silent_dismiss.hydrate(pool).await?;
         self.inbound_remote_rcpt.hydrate(pool, config).await?;
+        self.shared_port.hydrate(pool, config).await?;
         self.federation_tracker.hydrate(pool).await?;
         // Seed durable INBOX modseq so change-ids stay monotonic across restarts.
         for (user, modseq) in chatmail_db::load_all_modseq(pool).await? {

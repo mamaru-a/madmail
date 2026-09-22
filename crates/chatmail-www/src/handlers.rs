@@ -645,8 +645,10 @@ pub async fn mail_autoconfig(State(st): State<WwwState>, headers: HeaderMap) -> 
         smtp_addr: snap.smtp_addr,
         http_plain_addr: snap.http_plain_addr,
         http_tls_addr: snap.http_tls_addr,
-        alpn_imap_on_https: snap.alpn_imap_on_https,
-        alpn_smtp_on_https: snap.alpn_smtp_on_https,
+        // Live flags, not the boot-time snapshot: an admin toggle must show up
+        // in what we advertise to clients on the very next request.
+        alpn_imap_on_https: st.app.shared_port.imap(),
+        alpn_smtp_on_https: st.app.shared_port.smtp(),
     };
     let params = AutoconfigParams::from_mail_settings(&st.mail_domain, &mail, Some(&runtime));
     let xml = build_autoconfig_xml(&params);
@@ -761,8 +763,10 @@ async fn dclogin_mail_settings(st: &WwwState, headers: &HeaderMap) -> DcloginMai
         smtp_addr: snap.smtp_addr,
         http_plain_addr: snap.http_plain_addr,
         http_tls_addr: snap.http_tls_addr,
-        alpn_imap_on_https: snap.alpn_imap_on_https,
-        alpn_smtp_on_https: snap.alpn_smtp_on_https,
+        // Live flags, not the boot-time snapshot: an admin toggle must show up
+        // in what we advertise to clients on the very next request.
+        alpn_imap_on_https: st.app.shared_port.imap(),
+        alpn_smtp_on_https: st.app.shared_port.smtp(),
     };
 
     let db_ports = if st
@@ -803,8 +807,10 @@ async fn render_template(
         smtp_addr: snap.smtp_addr,
         http_plain_addr: snap.http_plain_addr,
         http_tls_addr: snap.http_tls_addr,
-        alpn_imap_on_https: snap.alpn_imap_on_https,
-        alpn_smtp_on_https: snap.alpn_smtp_on_https,
+        // Live flags, not the boot-time snapshot: an admin toggle must show up
+        // in what we advertise to clients on the very next request.
+        alpn_imap_on_https: st.app.shared_port.imap(),
+        alpn_smtp_on_https: st.app.shared_port.smtp(),
     };
     let ctx = match build_context(
         &st.pool,

@@ -162,6 +162,8 @@ Admin: `GET /admin/settings` (bulk) or `GET|POST /admin/settings/{name}` (`set` 
 | `__REGISTRATION_OPEN__` | `false` | `/admin/registration` | `POST /new` open/closed; CLI `madmail registration` |
 | `__JIT_REGISTRATION_ENABLED__` | `true` | `/admin/registration/jit` | First-login account create; falls back to registration open in `AuthCache` hydrate |
 | `__REGISTRATION_TOKEN_REQUIRED__` | `false` | `/admin/settings/registration_token_required` | Require token on `/new` |
+| `__SHARED_PORT_IMAP__` | file `alpn_imap` | `/admin/settings/shared_port_imap` | IMAP on the HTTPS port; CLI `madmail shared-port` |
+| `__SHARED_PORT_SMTP__` | file `alpn_smtp` | `/admin/settings/shared_port_smtp` | Submission on the HTTPS port; CLI `madmail shared-port` |
 | `__TURN_ENABLED__` | `true` | `/admin/services/turn` | Embedded TURN + IMAP METADATA |
 | `__IROH_ENABLED__` | `true` | `/admin/services/iroh` | Embedded iroh-relay + IMAP metadata |
 | `__SS_ENABLED__` | `true` (only if SS configured in file) | `/admin/services/shadowsocks` | Raw TCP Shadowsocks relay |
@@ -345,6 +347,20 @@ chatmail tls://0.0.0.0:443 {
 Either directive makes the HTTPS listener also serve mail, demultiplexed by the
 ALPN token the client offered (`crates/chatmail/src/shared_listener.rs`). The
 listener takes over the existing `http_tls` slot rather than binding 443 twice.
+
+**The directives are the default, not the last word.** `__SHARED_PORT_IMAP__` /
+`__SHARED_PORT_SMTP__` override them per protocol, written by the admin panel
+(`/admin/settings/shared_port_*`) or `madmail shared-port`. The listener reads the
+flags once per connection and picks the TLS config advertising exactly the enabled
+tokens, so a toggle applies to the next connection — no restart, no rebinding, and
+a protocol that is switched off stops being advertised rather than being
+negotiated and then dropped onto the website. Autoconfig reads the same flags, so
+clients stop being told to use 443 for a protocol that is off.
+
+The one case a toggle cannot cover is a config file with **no** `chatmail tls://…`
+block: the HTTPS port is then a plain listener with nothing to demultiplex, so the
+admin API answers `restart_required: true` and `madmail shared-port status` says
+so, instead of appearing to work.
 
 Three signals identify a connection, in this order:
 

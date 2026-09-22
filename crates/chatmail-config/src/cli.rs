@@ -189,6 +189,12 @@ pub enum Command {
     /// Authenticated submission is unaffected.
     #[command(name = "openrelay", subcommand)]
     Openrelay(OpenrelayCommand),
+    /// Serve IMAP / submission on the HTTPS port, or stop doing so.
+    ///
+    /// Overrides the `alpn_imap` / `alpn_smtp` directives
+    /// (`__SHARED_PORT_IMAP__` / `__SHARED_PORT_SMTP__`).
+    #[command(name = "shared-port", subcommand)]
+    SharedPort(SharedPortCommand),
     /// Migrate submission PGP policy in config.
     #[command(name = "migrate-pgp-config")]
     MigratePgpConfig,
@@ -876,6 +882,26 @@ pub enum OpenrelayCommand {
     Disable,
 }
 
+/// `madmail shared-port` — mail on the HTTPS port
+/// (`__SHARED_PORT_IMAP__` / `__SHARED_PORT_SMTP__` over `alpn_imap` / `alpn_smtp`).
+#[derive(Debug, Subcommand, Clone)]
+pub enum SharedPortCommand {
+    /// Show which protocols the HTTPS port serves, and where that came from.
+    Status,
+    /// Serve a protocol on the HTTPS port.
+    Enable {
+        /// `imap`, `smtp`, or `both` (default).
+        #[arg(value_name = "PROTOCOL", default_value = "both")]
+        protocol: String,
+    },
+    /// Stop serving a protocol on the HTTPS port.
+    Disable {
+        /// `imap`, `smtp`, or `both` (default).
+        #[arg(value_name = "PROTOCOL", default_value = "both")]
+        protocol: String,
+    },
+}
+
 /// `chatmail accounts` / `madmail accounts` (direct DB).
 #[derive(Debug, Subcommand, Clone)]
 pub enum AccountsCommand {
@@ -1312,6 +1338,32 @@ mod tests {
             "state_dir should be unset for default install, got {:?}",
             args.state_dir
         );
+    }
+
+    #[test]
+    fn parse_shared_port_status_enable_disable() {
+        let cli = Cli::try_parse_from(["madmail", "shared-port", "status"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Command::SharedPort(SharedPortCommand::Status))
+        ));
+
+        // No protocol given means both, so `enable` alone is not a silent no-op.
+        let cli = Cli::try_parse_from(["madmail", "shared-port", "enable"]).unwrap();
+        match cli.command {
+            Some(Command::SharedPort(SharedPortCommand::Enable { protocol })) => {
+                assert_eq!(protocol, "both");
+            }
+            other => panic!("expected shared-port enable, got {other:?}"),
+        }
+
+        let cli = Cli::try_parse_from(["madmail", "shared-port", "disable", "imap"]).unwrap();
+        match cli.command {
+            Some(Command::SharedPort(SharedPortCommand::Disable { protocol })) => {
+                assert_eq!(protocol, "imap");
+            }
+            other => panic!("expected shared-port disable imap, got {other:?}"),
+        }
     }
 
     #[test]

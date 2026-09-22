@@ -52,6 +52,7 @@ mod reload;
 mod request_reload;
 mod service_cmd;
 mod service_toggle;
+mod shared_port;
 mod sharing;
 mod status_cmd;
 mod tasks;

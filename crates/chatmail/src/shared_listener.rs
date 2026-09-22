@@ -60,7 +60,7 @@ use axum::Router;
 use chatmail_db::DbPool;
 use chatmail_imap::{connection_stats, ImapSession, ImapSessionConfig};
 use chatmail_smtp::{SmtpSession, SmtpSessionConfig};
-use chatmail_state::AppState;
+use chatmail_state::{AppState, SharedPortFlags};
 use chatmail_tls::{load_server_config, load_server_config_with_alpn};
 use chatmail_types::Result;
 use rustls::ServerConfig;
@@ -161,6 +161,52 @@ pub fn load_mail_tls_configs(cert: &Path, key: &Path) -> Result<MailTlsConfigs> 
         submission_tls: load_server_config_with_alpn(cert, key, &[ALPN_SMTP.as_bytes()])?,
         no_alpn: load_server_config(cert, key)?,
     })
+}
+
+/// The HTTPS port's TLS configs, one per combination of enabled mail protocols.
+///
+/// The advertised ALPN list is baked into a rustls `ServerConfig`, so a live
+/// toggle cannot mutate one in place: a port still advertising `imap` after IMAP
+/// was disabled would negotiate the token and then serve HTTPS, which is worse
+/// than not offering it. Building all four up front costs four cheap clones of an
+/// already-parsed certificate, and `LazyConfigAcceptor` picks between them after
+/// the ClientHello — no rebinding, no restart.
+pub struct SharedTlsConfigs {
+    both: Arc<ServerConfig>,
+    imap_only: Arc<ServerConfig>,
+    smtp_only: Arc<ServerConfig>,
+    /// Neither protocol enabled: advertise nothing, exactly like a plain HTTPS port.
+    none: Arc<ServerConfig>,
+}
+
+impl SharedTlsConfigs {
+    pub fn load(cert: &Path, key: &Path) -> Result<Self> {
+        Ok(Self {
+            both: load_server_config_with_alpn_tokens(cert, key, alpn_tokens(true, true))?,
+            imap_only: load_server_config_with_alpn_tokens(cert, key, alpn_tokens(true, false))?,
+            smtp_only: load_server_config_with_alpn_tokens(cert, key, alpn_tokens(false, true))?,
+            none: load_server_config(cert, key)?,
+        })
+    }
+
+    /// The config advertising exactly the tokens these flags enable.
+    pub fn pick(&self, imap: bool, smtp: bool) -> Arc<ServerConfig> {
+        match (imap, smtp) {
+            (true, true) => Arc::clone(&self.both),
+            (true, false) => Arc::clone(&self.imap_only),
+            (false, true) => Arc::clone(&self.smtp_only),
+            (false, false) => Arc::clone(&self.none),
+        }
+    }
+}
+
+fn load_server_config_with_alpn_tokens(
+    cert: &Path,
+    key: &Path,
+    tokens: Vec<Vec<u8>>,
+) -> Result<Arc<ServerConfig>> {
+    let refs: Vec<&[u8]> = tokens.iter().map(Vec::as_slice).collect();
+    load_server_config_with_alpn(cert, key, &refs)
 }
 
 /// Hostnames that identify a mail protocol when the client sent no ALPN.
@@ -277,10 +323,9 @@ pub struct SharedMail {
     pub pool: DbPool,
     pub imap: ImapSessionConfig,
     pub submission: SmtpSessionConfig,
-    /// Serve IMAP on this port for clients offering the [`ALPN_IMAP`] token.
-    pub alpn_imap: bool,
-    /// Serve submission on this port for clients offering the [`ALPN_SMTP`] token.
-    pub alpn_smtp: bool,
+    /// Which mail protocols this port serves. Read once per connection rather
+    /// than captured at boot, so the admin toggle applies without a restart.
+    pub flags: Arc<SharedPortFlags>,
     /// Hostnames that select a protocol when the client offers no ALPN.
     pub sni: SniPolicy,
 }
@@ -300,7 +345,7 @@ const GREETING_PEEK: Duration = Duration::from_millis(250);
 pub async fn run_shared_listener(
     addr: &str,
     cancel: CancellationToken,
-    tls: Arc<ServerConfig>,
+    tls: Arc<SharedTlsConfigs>,
     router: Router,
     mail: SharedMail,
 ) -> Result<()> {
@@ -308,8 +353,8 @@ pub async fn run_shared_listener(
     let mail = Arc::new(mail);
     info!(
         %addr,
-        alpn_imap = mail.alpn_imap,
-        alpn_smtp = mail.alpn_smtp,
+        alpn_imap = mail.flags.imap(),
+        alpn_smtp = mail.flags.smtp(),
         sni_imap = ?mail.sni.imap,
         sni_smtp = ?mail.sni.smtp,
         "shared TLS listener (HTTPS + mail)"
@@ -343,10 +388,13 @@ pub async fn run_shared_listener(
 async fn serve_one(
     stream: tokio::net::TcpStream,
     peer: std::net::SocketAddr,
-    tls: Arc<ServerConfig>,
+    tls: Arc<SharedTlsConfigs>,
     router: Router,
     mail: Arc<SharedMail>,
 ) {
+    // Read the toggles once, here, so one connection is routed by one consistent
+    // answer even if an operator flips a switch mid-handshake.
+    let (imap_on, smtp_on) = (mail.flags.imap(), mail.flags.smtp());
     // Read the ClientHello before choosing anything, so SNI is available even when
     // the client offered no ALPN for rustls to negotiate.
     let start = match LazyConfigAcceptor::new(rustls::server::Acceptor::default(), stream).await {
@@ -365,16 +413,12 @@ async fn serve_one(
             // always sends ALPN, and its SNI is whatever is in the URL bar.
             None
         } else {
-            route_sni(
-                hello.server_name(),
-                &mail.sni,
-                mail.alpn_imap,
-                mail.alpn_smtp,
-            )
+            route_sni(hello.server_name(), &mail.sni, imap_on, smtp_on)
         }
     };
 
-    let tls_stream = match start.into_stream(tls).await {
+    // Advertise exactly the tokens that are enabled right now.
+    let tls_stream = match start.into_stream(tls.pick(imap_on, smtp_on)).await {
         Ok(s) => s,
         Err(e) => {
             // Also the path for a strict-ALPN rejection.
@@ -390,7 +434,7 @@ async fn serve_one(
 
     let negotiated = tls_stream.get_ref().1.alpn_protocol().map(<[u8]>::to_vec);
     if negotiated.is_some() {
-        let proto = route(negotiated.as_deref(), mail.alpn_imap, mail.alpn_smtp);
+        let proto = route(negotiated.as_deref(), imap_on, smtp_on);
         dispatch(proto, tls_stream, peer, router, mail).await;
         return;
     }
@@ -399,9 +443,20 @@ async fn serve_one(
     // a client that speaks first can be identified here at all, since IMAP and SMTP
     // servers must greet before the client may send a command. `fill_buf` is
     // cancel-safe and leaves the bytes for the handler that follows.
+    if !(imap_on || smtp_on) {
+        // Nothing to demultiplex into: serve it as HTTPS without the peek, so a
+        // port with mail disabled behaves exactly like a plain HTTPS listener.
+        dispatch(SharedProto::Http, tls_stream, peer, router, mail).await;
+        return;
+    }
     let mut buffered = BufReader::new(tls_stream);
     let proto = match tokio::time::timeout(GREETING_PEEK, buffered.fill_buf()).await {
-        Ok(Ok(first)) => classify_first_bytes(first).unwrap_or(SharedProto::Http),
+        Ok(Ok(first)) => match classify_first_bytes(first) {
+            // A disabled protocol is not a routing target, however the client spoke.
+            Some(SharedProto::Imap) if !imap_on => SharedProto::Http,
+            Some(SharedProto::Submission) if !smtp_on => SharedProto::Http,
+            other => other.unwrap_or(SharedProto::Http),
+        },
         Ok(Err(e)) => {
             tracing::debug!(%peer, error = %e, "shared listener read failed");
             return;
@@ -509,7 +564,19 @@ mod tests {
         addr: std::net::SocketAddr,
         roots: RootCertStore,
         cancel: CancellationToken,
+        /// Live toggles, shared with the running listener.
+        flags: Arc<SharedPortFlags>,
         _dir: tempfile::TempDir,
+    }
+
+    /// Write a generated certificate to disk: `SharedTlsConfigs` loads PEM files,
+    /// as it does in production.
+    fn write_pem(dir: &Path, rc: &rcgen::CertifiedKey) -> (std::path::PathBuf, std::path::PathBuf) {
+        let cert_path = dir.join("cert.pem");
+        let key_path = dir.join("key.pem");
+        std::fs::write(&cert_path, rc.cert.pem()).unwrap();
+        std::fs::write(&key_path, rc.key_pair.serialize_pem()).unwrap();
+        (cert_path, key_path)
     }
 
     impl Harness {
@@ -548,27 +615,25 @@ mod tests {
 
         let rc = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
         let cert = CertificateDer::from(rc.cert.der().to_vec());
-        let key = PrivateKeyDer::Pkcs8(rc.key_pair.serialize_der().into());
-        let mut server = ServerConfig::builder()
-            .with_no_client_auth()
-            .with_single_cert(vec![cert.clone()], key)
-            .unwrap();
-        server.alpn_protocols = alpn_tokens(true, true);
         let mut roots = RootCertStore::empty();
         roots.add(cert).unwrap();
 
         let dir = tempfile::tempdir().unwrap();
+        let (cert_path, key_path) = write_pem(dir.path(), &rc);
+        let tls = Arc::new(SharedTlsConfigs::load(&cert_path, &key_path).unwrap());
         let pool = chatmail_db::init_memory_db().await.unwrap();
         let ctx = Arc::new(AppState::new(dir.path(), pool.clone()));
         ctx.auth.hydrate(&pool).await.unwrap();
 
+        let flags = Arc::new(SharedPortFlags::default());
+        flags.set_imap(true);
+        flags.set_smtp(true);
         let mail = SharedMail {
             ctx,
             pool,
             imap: test_imap_cfg(),
             submission: test_submission_cfg(),
-            alpn_imap: true,
-            alpn_smtp: true,
+            flags: Arc::clone(&flags),
             sni: SniPolicy::default(),
         };
 
@@ -579,9 +644,7 @@ mod tests {
         let cancel = CancellationToken::new();
         let bg = cancel.clone();
         tokio::spawn(async move {
-            let _ =
-                run_shared_listener(&addr.to_string(), bg, Arc::new(server), Router::new(), mail)
-                    .await;
+            let _ = run_shared_listener(&addr.to_string(), bg, tls, Router::new(), mail).await;
         });
         wait_until_listening(addr).await;
 
@@ -589,6 +652,7 @@ mod tests {
             addr,
             roots,
             cancel,
+            flags,
             _dir: dir,
         }
     }
@@ -692,6 +756,47 @@ mod tests {
             err.to_string().contains("alert") || err.to_string().contains("protocol"),
             "expected a no_application_protocol alert, got: {err}"
         );
+        h.cancel.cancel();
+    }
+
+    /// P12-IT09: an admin toggle changes what the port does, on the next
+    /// connection, without restarting or rebinding.
+    ///
+    /// The advertised ALPN list lives in the rustls `ServerConfig`, so this also
+    /// locks the half that is easy to get wrong: after IMAP is switched off the
+    /// port must stop *offering* `imap`, not merely refuse to route it. A port that
+    /// kept advertising a token it no longer serves would negotiate it and then
+    /// hand the client an HTTPS server, which is worse than never offering it.
+    #[tokio::test]
+    async fn p12_it09_live_toggle_changes_routing_without_restart() {
+        let h = harness().await;
+        assert!(
+            h.probe(&[ALPN_IMAP.as_bytes().to_vec()], b"")
+                .await
+                .starts_with("* OK"),
+            "IMAP is enabled to begin with"
+        );
+
+        h.flags.set_imap(false);
+        let err = h
+            .connect(&[ALPN_IMAP.as_bytes().to_vec()])
+            .await
+            .expect_err("a disabled protocol must no longer be advertised");
+        assert!(
+            err.to_string().contains("alert") || err.to_string().contains("protocol"),
+            "expected no_application_protocol once imap is off, got: {err}"
+        );
+
+        // The other protocol is untouched, and re-enabling is live too.
+        assert!(h
+            .probe(&[ALPN_SMTP.as_bytes().to_vec()], b"")
+            .await
+            .starts_with("220"));
+        h.flags.set_imap(true);
+        assert!(h
+            .probe(&[ALPN_IMAP.as_bytes().to_vec()], b"")
+            .await
+            .starts_with("* OK"));
         h.cancel.cancel();
     }
 
@@ -991,19 +1096,19 @@ mod tests {
         ])
         .unwrap();
         let cert = CertificateDer::from(rc.cert.der().to_vec());
-        let key = PrivateKeyDer::Pkcs8(rc.key_pair.serialize_der().into());
-        let mut server = ServerConfig::builder()
-            .with_no_client_auth()
-            .with_single_cert(vec![cert.clone()], key)
-            .unwrap();
-        server.alpn_protocols = alpn_tokens(true, true);
         let mut roots = RootCertStore::empty();
         roots.add(cert).unwrap();
 
         let dir = tempfile::tempdir().unwrap();
+        let (cert_path, key_path) = write_pem(dir.path(), &rc);
+        let tls = Arc::new(SharedTlsConfigs::load(&cert_path, &key_path).unwrap());
         let pool = chatmail_db::init_memory_db().await.unwrap();
         let ctx = Arc::new(AppState::new(dir.path(), pool.clone()));
         ctx.auth.hydrate(&pool).await.unwrap();
+
+        let flags = Arc::new(SharedPortFlags::default());
+        flags.set_imap(true);
+        flags.set_smtp(true);
 
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
@@ -1011,19 +1116,19 @@ mod tests {
 
         let cancel = CancellationToken::new();
         let bg = cancel.clone();
+        let bg_flags = Arc::clone(&flags);
         tokio::spawn(async move {
             let _ = run_shared_listener(
                 &addr.to_string(),
                 bg,
-                Arc::new(server),
+                tls,
                 Router::new(),
                 SharedMail {
                     ctx,
                     pool,
                     imap: test_imap_cfg(),
                     submission: test_submission_cfg(),
-                    alpn_imap: true,
-                    alpn_smtp: true,
+                    flags: bg_flags,
                     sni: SniPolicy::default(),
                 },
             )
@@ -1035,6 +1140,7 @@ mod tests {
             addr,
             roots,
             cancel,
+            flags,
             _dir: dir,
         }
     }
