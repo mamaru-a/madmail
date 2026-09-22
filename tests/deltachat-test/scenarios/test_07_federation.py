@@ -234,7 +234,7 @@ def run(rpc, dc, acc1, acc2, remote1, remote2, timestamp, server_info=None):
     contact_on_acc2 = acc2.get_contact_by_addr(acc1_email)
     already_verified = False
     if contact_on_acc2:
-        already_verified = contact_on_acc2.get_snapshot().is_verified
+        already_verified = contact_on_acc2.get_snapshot().e2ee_avail
 
     if already_verified:
         print("  Secure join already established, skipping.")

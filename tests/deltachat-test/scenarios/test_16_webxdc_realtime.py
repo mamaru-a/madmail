@@ -50,13 +50,13 @@ def run(dc, domain):
     while time.time() - start_time < 60:
         if not verified2:
             c2 = acc2.get_contact_by_addr(addr1)
-            if c2 and c2.get_snapshot().is_verified:
+            if c2 and c2.get_snapshot().e2ee_avail:
                 print("Acc2 verified Acc1.")
                 verified2 = True
         
         if not verified1:
             c1 = acc1.get_contact_by_addr(addr2)
-            if c1 and c1.get_snapshot().is_verified:
+            if c1 and c1.get_snapshot().e2ee_avail:
                 print("Acc1 verified Acc2.")
                 verified1 = True
         

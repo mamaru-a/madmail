@@ -99,7 +99,7 @@ def _ensure_secure_join(rpc, inviter, joiner) -> None:
     """Secure-join joiner to inviter when cross-server E2E is required."""
     joiner_email = joiner.get_config("addr")
     contact = inviter.get_contact_by_addr(joiner_email)
-    if contact and contact.get_snapshot().is_verified:
+    if contact and contact.get_snapshot().e2ee_avail:
         return
     print(f"  Secure-joining {inviter.get_config('addr')} <-> {joiner_email}...")
     test_03_secure_join.run(rpc, inviter, joiner)

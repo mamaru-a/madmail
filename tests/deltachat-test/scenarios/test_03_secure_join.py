@@ -24,13 +24,13 @@ def run(rpc, inviter, joiner):
     joiner.wait_for_securejoin_joiner_success()
 
     contact_on_joiner = joiner.get_contact_by_addr(inviter_email)
-    if not contact_on_joiner or not contact_on_joiner.get_snapshot().is_verified:
+    if not contact_on_joiner or not contact_on_joiner.get_snapshot().e2ee_avail:
         raise Exception(
             "Secure Join events completed but joiner does not show verified inviter contact"
         )
 
     contact_on_inviter = inviter.get_contact_by_addr(joiner_email)
-    if not contact_on_inviter or not contact_on_inviter.get_snapshot().is_verified:
+    if not contact_on_inviter or not contact_on_inviter.get_snapshot().e2ee_avail:
         raise Exception(
             "Secure Join events completed but inviter does not show verified joiner contact"
         )
