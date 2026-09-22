@@ -1,3 +1,10 @@
+## [2.29.1](https://github.com/themadorg/madmail/compare/v2.29.0...v2.29.1) (2026-09-22)
+
+
+### Bug Fixes
+
+* **deps:** bump rustls to 0.23.45 for RUSTSEC-2026-0285 ([16c45f5](https://github.com/themadorg/madmail/commit/16c45f5a4e2af99413eab9865816cb6e1d58fbfc))
+
 # [2.29.0](https://github.com/themadorg/madmail/compare/v2.28.0...v2.29.0) (2026-09-15)
 
 
