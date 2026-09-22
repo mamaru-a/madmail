@@ -17,7 +17,7 @@ def run(admin, member, group_name):
     snap = existing_contact.get_snapshot()
     print(f"  Member contact ID: {existing_contact.id}")
     print(f"  Contact address: {snap.address}")
-    print(f"  is_verified: {snap.is_verified}")
+    print(f"  e2ee_avail: {snap.e2ee_avail}")
     
     # Create the group
     group = admin.create_group(group_name)

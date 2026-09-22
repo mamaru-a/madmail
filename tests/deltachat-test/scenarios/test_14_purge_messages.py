@@ -144,7 +144,7 @@ def run(rpc, dc, acc_sender, acc_receiver, remote1, remote2):
     receiver_addr = acc_receiver.get_config("addr")
 
     contact = acc_sender.get_contact_by_addr(receiver_addr)
-    if not contact or not contact.get_snapshot().is_verified:
+    if not contact or not contact.get_snapshot().e2ee_avail:
         print(f"Secure-joining {sender_addr} <-> {receiver_addr}...")
         test_03_secure_join.run(rpc, acc_sender, acc_receiver)
         time.sleep(2)
