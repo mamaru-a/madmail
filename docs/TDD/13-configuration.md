@@ -350,7 +350,7 @@ listener takes over the existing `http_tls` slot rather than binding 443 twice.
 
 **The directives are the default, not the last word.** `__SHARED_PORT_IMAP__` /
 `__SHARED_PORT_SMTP__` override them per protocol, written by the admin panel
-(`/admin/settings/shared_port_*`) or `madmail shared-port`. The listener reads the
+(`/admin/settings/shared_port_*`) or `madmail shared-port` (alias `madmail alpn`). The listener reads the
 flags once per connection and picks the TLS config advertising exactly the enabled
 tokens, so a toggle applies to the next connection — no restart, no rebinding, and
 a protocol that is switched off stops being advertised rather than being

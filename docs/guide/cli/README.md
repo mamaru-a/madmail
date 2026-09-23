@@ -195,7 +195,7 @@ Outbound delivery queue (`remote_queue`): status, list, show, remove, purge.
 
 ### [`shared-port`](shared-port.md)
 
-IMAP / submission on the HTTPS port (443).
+IMAP / submission on the HTTPS port (443). Alias: `madmail alpn`.
 
 - `status`
 - `enable [imap|smtp|both]`

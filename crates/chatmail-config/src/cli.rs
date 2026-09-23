@@ -193,7 +193,10 @@ pub enum Command {
     ///
     /// Overrides the `alpn_imap` / `alpn_smtp` directives
     /// (`__SHARED_PORT_IMAP__` / `__SHARED_PORT_SMTP__`).
-    #[command(name = "shared-port", subcommand)]
+    ///
+    /// Aliased as `alpn`, the name of the directives operators configure, even
+    /// though the switch also governs the SNI and first-bytes routes.
+    #[command(name = "shared-port", alias = "alpn", subcommand)]
     SharedPort(SharedPortCommand),
     /// Migrate submission PGP policy in config.
     #[command(name = "migrate-pgp-config")]
@@ -1363,6 +1366,19 @@ mod tests {
                 assert_eq!(protocol, "imap");
             }
             other => panic!("expected shared-port disable imap, got {other:?}"),
+        }
+
+        // `alpn` is the name operators know from the config directives.
+        for argv in [
+            ["madmail", "alpn", "status"],
+            ["madmail", "alpn", "enable"],
+            ["madmail", "alpn", "disable"],
+        ] {
+            let cli = Cli::try_parse_from(argv).unwrap();
+            assert!(
+                matches!(cli.command, Some(Command::SharedPort(_))),
+                "{argv:?} should reach shared-port"
+            );
         }
     }
 

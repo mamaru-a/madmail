@@ -16,7 +16,12 @@ Each protocol is independent: submission can stay on 443 while IMAP does not.
 
 ```bash
 madmail shared-port <status|enable|disable> [imap|smtp|both]
+madmail alpn <status|enable|disable> [imap|smtp|both]   # same command
 ```
+
+`alpn` is an alias, named after the `alpn_imap` / `alpn_smtp` directives operators
+configure. The command covers more than ALPN — it also gates the hostname (SNI)
+and first-bytes routes — which is why `shared-port` is the primary name.
 
 ## Global flags
 
