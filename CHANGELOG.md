@@ -1,3 +1,19 @@
+# [2.30.0](https://github.com/themadorg/madmail/compare/v2.29.1...v2.30.0) (2026-09-24)
+
+
+### Bug Fixes
+
+* **federation:** drop the unreachable SMTP-over-443 delivery retry ([39a6cec](https://github.com/themadorg/madmail/commit/39a6cec59075a78c19d069005a733925ffdec3a5))
+* **security:** advertise strict ALPN on the dedicated mail TLS ports ([8b711c1](https://github.com/themadorg/madmail/commit/8b711c18109309b857c47331a393f35c641a5eea))
+
+
+### Features
+
+* **admin:** toggle mail on the shared HTTPS port without a restart ([155efbf](https://github.com/themadorg/madmail/commit/155efbfe6c0707d82920e6a9d9b78c48dba7fa54)), closes [#170](https://github.com/themadorg/madmail/issues/170)
+* **cli:** alias `madmail alpn` to `madmail shared-port` ([4fe1be0](https://github.com/themadorg/madmail/commit/4fe1be0b8561304ebb87b9af3a25f2e0c7d5381f))
+* **listeners:** identify shared-port mail by hostname and first bytes ([93d7f65](https://github.com/themadorg/madmail/commit/93d7f657099ebb694cb4ad8f04d568d6de2cd075))
+* **listeners:** serve IMAP and submission on the HTTPS port via ALPN ([9181ea4](https://github.com/themadorg/madmail/commit/9181ea4ad5d69ab2a08a07265cbbf9fd4a98b381))
+
 ## [2.29.1](https://github.com/themadorg/madmail/compare/v2.29.0...v2.29.1) (2026-09-22)
 
 
