@@ -24,8 +24,8 @@ use super::{
     accounts, admin_token, admin_web, blocklist_cmd, certificate, db, delete_cmd, dkim, docs,
     endpoint_cache, federation, firewall_cmd, html, install, iroh, language, message_size, monitor,
     openrelay, port, proxy, push, queue_cmd, registration, registration_tokens, reload,
-    service_cmd, service_toggle, sharing, status_cmd, tasks, uninstall, version, versions_cmd,
-    webmail_cors,
+    service_cmd, service_toggle, shared_port, sharing, status_cmd, tasks, uninstall, version,
+    versions_cmd, webmail_cors,
 };
 
 pub async fn dispatch(cli: &Cli) -> Result<()> {
@@ -81,6 +81,7 @@ pub async fn dispatch(cli: &Cli) -> Result<()> {
         }
         Some(Command::Registration(cmd)) => registration::registration(&cli.args, cmd).await,
         Some(Command::Openrelay(cmd)) => openrelay::openrelay(&cli.args, cmd).await,
+        Some(Command::SharedPort(cmd)) => shared_port::shared_port(&cli.args, cmd).await,
         Some(Command::Webimap(cmd)) => {
             service_toggle::run(
                 &cli.args,
@@ -178,6 +179,7 @@ fn command_name(cmd: &Command) -> &'static str {
         Command::Language { .. } => "language",
         Command::Registration { .. } => "registration",
         Command::Openrelay { .. } => "openrelay",
+        Command::SharedPort { .. } => "shared-port",
         Command::MigratePgpConfig => "migrate-pgp-config",
         Command::Monitor { .. } => "monitor",
         Command::Status { .. } => "status",

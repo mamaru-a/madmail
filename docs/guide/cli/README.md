@@ -192,6 +192,15 @@ Outbound delivery queue (`remote_queue`): status, list, show, remove, purge.
 - [`enable`](openrelay-enable.md)
 - [`disable`](openrelay-disable.md)
 
+
+### [`shared-port`](shared-port.md)
+
+IMAP / submission on the HTTPS port (443). Alias: `madmail alpn`.
+
+- `status`
+- `enable [imap|smtp|both]`
+- `disable [imap|smtp|both]`
+
 ## Services & limits
 
 ### [`port`](port.md)

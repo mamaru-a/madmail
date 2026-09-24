@@ -51,6 +51,11 @@ pub const FEDERATION_ENABLED: &str = "__FEDERATION_ENABLED__";
 /// (open-relay-class). Default off — file `allow_inbound_remote_rcpt` is the fallback
 /// when this key is unset.
 pub const ALLOW_INBOUND_REMOTE_RCPT: &str = "__ALLOW_INBOUND_REMOTE_RCPT__";
+/// When set, overrides the `alpn_imap` directive: serve IMAP on the HTTPS port.
+/// Unset falls back to the config file, so an untouched server behaves as before.
+pub const SHARED_PORT_IMAP: &str = "__SHARED_PORT_IMAP__";
+/// Same for `alpn_smtp` — submission on the HTTPS port.
+pub const SHARED_PORT_SMTP: &str = "__SHARED_PORT_SMTP__";
 
 // ── Port settings ────────────────────────────────────────────────────────────
 pub const SMTP_PORT: &str = "__SMTP_PORT__";

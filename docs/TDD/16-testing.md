@@ -27,7 +27,7 @@ Chatmail's correctness is defined by **real Delta Chat client behavior**, not ju
   - **Auth cache** (credentials, blocklist, JIT flag hydrate + write-through)
   - **dclogin URL** shape (`build_dclogin_link`, `POST /new`, cmping IP URLs)
   - **STARTTLS** (IMAP LOGIN gate, SMTP AUTH-after-TLS, TLS cert load for plain listeners)
-  - **Autoconfig** (SSL/STARTTLS entries, no fake HTTPS ALPN IMAP)
+  - **Autoconfig** (SSL/STARTTLS entries; HTTPS ALPN entries only when `alpn_imap`/`alpn_smtp` are configured)
 
 ### madmail-v2 unit test index (parity fixes)
 
@@ -38,7 +38,8 @@ Chatmail's correctness is defined by **real Delta Chat client behavior**, not ju
 | cmping IP setup | `context/cmping/test_cmping_dclogin.py` | `test_ip_dclogin_includes_ssl_host_hints` |
 | Auth cache + JIT | `chatmail-state`, `chatmail-auth` | `hydrate_loads_blocklist_and_jit_flag`, `jit_coalesces_concurrent_creates_for_same_user` |
 | TLS for STARTTLS | `chatmail-config` | `listeners_need_tls_cert_for_starttls_only_ports` |
-| Autoconfig | `chatmail-config`, `chatmail-www` | `autoconfig_omits_https_alpn_even_when_http_tls_bound` |
+| Autoconfig | `chatmail-config`, `chatmail-www` | `autoconfig_omits_https_alpn_when_not_configured`, `p12_ut12_autoconfig_advertises_alpn_https_when_enabled` |
+| Shared HTTPS port (ALPN demux) | `chatmail` | `p12_it01_one_port_serves_imap_smtp_and_http` (real TLS: `imap`/`smtp`/no-ALPN over one listener), `p12_it02_unoffered_alpn_is_refused` (strict ALPN / ALPACA), `p12_ut16_legacy_directive_value_never_reaches_the_wire` |
 | IMAP caps (pre/post-auth) | `chatmail-imap` | `p5_ut01_test_capability_includes_chatmail_extensions` — pre-auth omits `XCHATMAIL`/`XDELTAPUSH`/`METADATA`; post-auth includes chatmail tokens (#120) |
 | Push notify | `chatmail-push`, `chatmail-admin` | `push_mode_and_circuit_breaker`, `successful_delivery_increments_push_stats`, `p9_push_service_toggle` |
 | IMAP push E2E | `tests/imap_e2e.rs` | `imap_e2e_push_devicetoken_setmetadata` (post-auth caps), `imap_e2e_push_disabled_hides_capabilities`, `imap_e2e_greeting_and_capability` |
@@ -94,6 +95,34 @@ Replicate and extend the existing Python test suite (`tests/deltachat-test/`).
 - Timing attacks on admin token
 - Federation policy bypass attempts (subdomains, IP literals, case)
 - PGP structure fuzzing / malformed messages
+
+## 6. Network-Condition Smoke Test (manual, off-CI)
+
+The shared-port demux (443 serving HTTPS + IMAP + submission) exists for networks
+that block 993/465 and inspect TLS. CI cannot exercise that: it needs a client
+sitting on such a network, so it is a manual run with a control.
+
+[`tests/highdpi-smoke/`](../../tests/highdpi-smoke/README.md) holds the harness:
+
+| Tier | What it establishes |
+|------|---------------------|
+| A | Which ports are reachable, and that the demux routes ALPN / SNI / first bytes correctly — classifying failures as blocked port, reset after ClientHello, alert 120, or cert mismatch |
+| B | Whether a given ClientHello shape is singled out, by comparing kill rates across seven shapes against the same IP and minute |
+| C | Authenticated IMAP LOGIN, IMAP IDLE survival over minutes, and submission upload throughput |
+| D | A real Delta Chat client pinned to `:443` (`deltachat-rpc-client`) |
+
+Rules that make the output meaningful:
+
+- Always pair a run on the network under test with a control run from an
+  unfiltered host; a lone report cannot separate filtering from misconfiguration.
+- Tiers A and B accept any certificate on purpose (they measure routing); tier C
+  verifies it, because credentials travel on that socket.
+- `A6` (SNI routing) reports SKIP unless the certificate covers `imap.<domain>`.
+  `madmail install` orders a single-name certificate, so that path needs a
+  certbot cert with the extra SANs — see `server-setup.sh`.
+
+The harness is validated against a local instance on high ports (recipe in the
+README); a correct build gives 13 PASS / 0 FAIL in tier A.
 
 ## Continuous Integration
 - GitHub Actions:

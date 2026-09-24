@@ -16,6 +16,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Effective TCP ports bound by the running supervisor (for `/admin/status` and dclogin).
+//!
+//! Which protocols the HTTPS port multiplexes is *not* here: that is live state an
+//! operator can toggle, and it lives in [`crate::shared_port::SharedPortFlags`] so
+//! there is one answer rather than a copy that can go stale.
 
 use std::sync::RwLock;
 

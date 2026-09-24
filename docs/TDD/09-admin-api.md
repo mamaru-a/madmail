@@ -74,6 +74,8 @@ Madmail-compatible JSON-RPC admin API. Full operator reference: [`context/madmai
 | `/admin/services/ss_ws` | GET, POST | Always `disabled` — raw TCP only; `enable` returns 400 |
 | `/admin/services/ss_grpc` | GET, POST | Always `disabled` — raw TCP only; `enable` returns 400 |
 | `/admin/services/http_proxy` | GET, POST | Stub — not implemented |
+| `/admin/settings/shared_port_imap` | GET, POST | IMAP on the HTTPS port (`__SHARED_PORT_IMAP__`, default `alpn_imap`). Applies live |
+| `/admin/settings/shared_port_smtp` | GET, POST | Submission on the HTTPS port (`__SHARED_PORT_SMTP__`, default `alpn_smtp`). Applies live |
 | `/admin/settings/ss_port`, `ss_cipher`, `ss_password`, … | GET, POST | Implemented when SS configured; `ss_ws_*` / `ss_grpc_*` settings stored but transports disabled |
 | `/admin/settings/http_proxy_*` | GET, POST | Stub — changes return 400 |
 | `/admin/message-size` | GET, PUT, DELETE | Implemented — effective cap (`appendlimit` ∧ `max_message_size`) |
