@@ -314,6 +314,27 @@ mod tests {
         ));
     }
 
+    /// Same as above for a DNS name: `primary_domain` moved from `old-domain.com`.
+    #[tokio::test]
+    async fn existing_user_on_other_dns_domain_can_login() {
+        let (ctx, _dir) = ctx_with_jit(true).await;
+        let hash = crate::hash_password("longpassword1").unwrap();
+        passwords::create_user(&ctx.pool, "olduser2@old-domain.com", &hash)
+            .await
+            .unwrap();
+        ctx.state.auth.insert("olduser2@old-domain.com", &hash);
+        authenticate(&ctx, "olduser2@old-domain.com", "longpassword1")
+            .await
+            .unwrap();
+        authenticate(&ctx, "OLDUSER2@OLD-DOMAIN.COM", "longpassword1")
+            .await
+            .unwrap();
+        assert!(matches!(
+            authenticate(&ctx, "olduser2@old-domain.com", "wrongpassword").await,
+            Err(ChatmailError::AuthFailed)
+        ));
+    }
+
     #[tokio::test]
     async fn jit_rejects_new_user_outside_jit_domain() {
         let (ctx, _dir) = ctx_with_jit(true).await;
