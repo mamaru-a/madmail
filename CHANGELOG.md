@@ -1,3 +1,10 @@
+## [2.30.1](https://github.com/themadorg/madmail/compare/v2.30.0...v2.30.1) (2026-09-28)
+
+
+### Bug Fixes
+
+* **auth:** let existing accounts on secondary local domains log in ([1a3e7bb](https://github.com/themadorg/madmail/commit/1a3e7bbb99d4d66462bc00dade7f4caba7b00d5e))
+
 # [2.30.0](https://github.com/themadorg/madmail/compare/v2.29.1...v2.30.0) (2026-09-24)
 
 
