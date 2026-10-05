@@ -26,7 +26,7 @@ from dotenv import load_dotenv
 # Incus harness sets REMOTE1/REMOTE2 before Python starts; keep them when .env
 # also defines deploy hosts (REMOTE1/REMOTE2 for make push).
 _incus_remotes = {}
-if os.getenv("DELTACHAT_TEST_INCUS"):
+if os.getenv("DELTACHAT_TEST_INCUS") or os.getenv("DELTACHAT_TEST_DOCKER"):
     for _key in ("REMOTE1", "REMOTE2"):
         _val = os.getenv(_key)
         if _val:
@@ -73,7 +73,7 @@ from stress import run_stress
 
 REMOTE1 = os.getenv("REMOTE1", "127.0.0.1")
 REMOTE2 = os.getenv("REMOTE2", "127.0.0.1")
-ROOT_DIR = PROJECT_ROOT
+ROOT_DIR = os.getenv("DELTACHAT_TEST_ROOT", PROJECT_ROOT)
 
 def collect_server_logs(test_dir, remote1, remote2):
     from utils.ssh import run_ssh_command
@@ -903,6 +903,8 @@ def main():
         
         if not cool:
             print(f"\nTest finished. Results in {test_dir}")
+        if cool and any(status == "fail" for status in cool.status.values()):
+            success = False
         if not success:
             sys.exit(1)
 

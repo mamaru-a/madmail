@@ -27,6 +27,11 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 
+# Allow both the suite runner and direct scenario invocation.
+if __package__ in (None, ""):
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from utils.local_server import configure_tls, smtp_connect, imap_connect, search_all
+
 def random_string(length=9):
     """Generate a random alphanumeric string."""
     return ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
@@ -75,7 +80,7 @@ class MaddyTestServer:
         print(f"  HTTP port: {self.http_port}")
         
         # Generate a minimal maddy config that supports auto-create
-        config_content = self._generate_config(state_dir)
+        config_content = configure_tls(self._generate_config(state_dir), state_dir)
         config_path = os.path.join(config_dir, "maddy.conf")
         
         with open(config_path, 'w') as f:
@@ -89,12 +94,16 @@ class MaddyTestServer:
             "-config", config_path,
             "run"
         ]
+        if os.environ.get("DELTACHAT_TEST_DOCKER"):
+            cmd = [maddy_binary, "--config", config_path,
+                   "--state-dir", state_dir, "run"]
         
         print(f"  Starting maddy: {' '.join(cmd)}")
         
+        self.server_log = tempfile.TemporaryFile(mode="w+t")
         self.process = subprocess.Popen(
             cmd,
-            stdout=subprocess.PIPE,
+            stdout=self.server_log,
             stderr=subprocess.STDOUT,
             text=True,
             preexec_fn=os.setsid  # Create new process group for clean shutdown
@@ -109,7 +118,8 @@ class MaddyTestServer:
         while time.time() - start_time < timeout:
             if self.process.poll() is not None:
                 # Process exited - read output
-                output = self.process.stdout.read() if self.process.stdout else ""
+                self.server_log.seek(0)
+                output = self.server_log.read()
                 raise Exception(f"Maddy server exited unexpectedly: {output}")
             
             # Check if we can connect to the ports
@@ -144,6 +154,8 @@ class MaddyTestServer:
             time.sleep(0.5)
         
         # Timeout - read output for debugging
+        self.server_log.seek(0)
+        print(self.server_log.read())
         self.stop()
         raise Exception(f"Server did not start within {timeout}s. Listeners ready mask: {listeners_ready}")
     
@@ -234,6 +246,7 @@ chatmail tcp://127.0.0.1:{self.http_port} {{
                 except ProcessLookupError:
                     pass
             self.process = None
+            self.server_log.close()
         
         # Clean up temp directory
         if self.temp_dir:
@@ -265,7 +278,7 @@ class IMAPIdleClient:
         
     def connect(self):
         """Connect and login to IMAP server."""
-        self.imap = imaplib.IMAP4(self.host, self.port)
+        self.imap = imap_connect(self.host, self.port)
         self.imap.login(self.username, self.password)
         self.imap.select('INBOX')
         print(f"    IMAP connected: {self.username}")
@@ -325,7 +338,7 @@ class IMAPIdleClient:
                             # wasn't committed yet when the notification was sent.
                             try:
                                 self.imap.select('INBOX')
-                                status, data = self.imap.search(None, 'ALL')
+                                status, data = search_all(self.imap)
                                 if status == 'OK' and data[0]:
                                     msg_nums = data[0].split()
                                     if msg_nums:
@@ -377,7 +390,7 @@ class IMAPIdleClient:
         """Fetch all messages from INBOX."""
         # Need to re-select after IDLE
         self.imap.select('INBOX')
-        status, data = self.imap.search(None, 'ALL')
+        status, data = search_all(self.imap)
         if status != 'OK':
             return []
         
@@ -456,12 +469,12 @@ def run(test_dir=None, maddy_binary=None):
         print(f"\nStep 2: Creating sender account: {sender_email}")
         
         # Test SMTP login for sender (this auto-creates the account)
-        smtp = smtplib.SMTP('127.0.0.1', smtp_port)
+        smtp = smtp_connect('127.0.0.1', smtp_port)
         smtp.login(f"{sender_user}@{domain}", sender_pass)
         print(f"  Sender SMTP login successful")
         
         # Test IMAP login for sender
-        sender_imap = imaplib.IMAP4('127.0.0.1', imap_port)
+        sender_imap = imap_connect('127.0.0.1', imap_port)
         sender_imap.login(f"{sender_user}@{domain}", sender_pass)
         sender_imap.select('INBOX')
         print(f"  Sender IMAP login successful")

@@ -2,6 +2,10 @@
 # deltachat-test calls plain `ssh root@<relay-ip>`; cmlxc uses key auth via its ssh-config.
 set -eu
 
+if [ -n "${DELTACHAT_TEST_DOCKER:-}" ]; then
+	exec python3 "$(dirname "$0")/../deltachat-test/utils/docker_remote.py" "$@"
+fi
+
 REAL_SSH="${DELTACHAT_REAL_SSH:-/usr/bin/ssh}"
 SSH_CONFIG="${DELTACHAT_TEST_SSH_CONFIG:-${HOME}/.config/cmlxc/ssh-config}"
 SSH_IDENTITY="${DELTACHAT_TEST_SSH_IDENTITY:-${HOME}/.config/cmlxc/id_localchat}"

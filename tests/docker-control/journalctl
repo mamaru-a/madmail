@@ -1,0 +1,54 @@
+#!/usr/bin/env python3
+"""Expose Docker log snapshots with the journal options used by the tests."""
+import datetime
+import json
+import re
+import sys
+
+snapshot = json.load(open("/run/docker-test-journal.json"))
+args = sys.argv[1:]
+
+
+def option(name):
+    for i, arg in enumerate(args):
+        if arg == name and i + 1 < len(args):
+            return args[i + 1]
+        if arg.startswith(name + "="):
+            return arg.split("=", 1)[1]
+    return None
+
+
+since = 0.0
+cursor = option("--after-cursor")
+if cursor:
+    since = float(cursor)
+value = option("--since")
+if value:
+    match = re.fullmatch(r"(\d+) (second|minute|hour)s? ago", value)
+    if match:
+        since = snapshot["now"] - int(match[1]) * {"second": 1, "minute": 60, "hour": 3600}[match[2]]
+    else:
+        since = datetime.datetime.fromisoformat(value).timestamp()
+records = []
+pattern = option("-g")
+# cmlxc recognizes Postfix/Go retry logs; Rust reports the same queue event
+# as "outbound delivery failed, requeued". Match that real log too.
+if pattern == "deferred|delivery attempt failed":
+    pattern += "|outbound delivery failed, requeued"
+for line in snapshot["logs"].splitlines():
+    stamp, _, message = line.partition(" ")
+    try:
+        when = datetime.datetime.fromisoformat(stamp.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        continue
+    if when > since and (not pattern or re.search(pattern, message)):
+        records.append(message)
+limit = option("-n")
+if "-n0" in args:
+    limit = "0"
+if limit is not None:
+    records = records[-int(limit):] if int(limit) else []
+for message in records:
+    print(message)
+if "--show-cursor" in args:
+    print(f"-- cursor: {snapshot['now']}")
