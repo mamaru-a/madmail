@@ -63,6 +63,8 @@ impl ExternalKey {
 }
 
 /// A keyed, durable body store with cheap linking for multi-recipient fan-out.
+// async_trait adds #[must_use] to boxed futures, which Clippy 1.99 considers redundant.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait ExternalStore: Send + Sync {
     /// Durably write `body` at `key` (content fsync + directory fsync via the backend).
