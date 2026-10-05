@@ -4,7 +4,7 @@
 # Deploy: `make push` builds release chatmail, scp's to test servers, replaces binary, restarts systemd (no signing).
 
 .PHONY: all init build build-admin-web build-chatmail-embed build-chatmail-embed-release build-with-admin-web build-release build-profiling build-release-static build-workspace build-all build-landing preview-landing \
-	test test-unit test-integration test-e2e test-maintenance test-imap test-turn test-core-turn test-deltachat test-deltachat-cmlxc test-mini-cmlxc test-full-cmlxc test-cmlxc-fullrun test-cmlxc-fullrun-madmail _test-cmlxc-prereqs t1-bench t1-report-demo \
+	test test-unit test-integration test-e2e test-docker test-deltachat-docker test-mini-docker test-full-docker test-maintenance test-imap test-turn test-core-turn test-deltachat test-deltachat-cmlxc test-mini-cmlxc test-full-cmlxc test-cmlxc-fullrun test-cmlxc-fullrun-madmail _test-cmlxc-prereqs t1-bench t1-report-demo \
 	check vet lint fmt fmt-check cov run run-bg run-debug ensure-dev-config restart stop logs reset-db dev-certs clean help \
 	sign push push1 push2 log1 log2 push-signed publish init-publish build-publish \
 	build-windows build-windows-amd64 build-windows-arm64 build-windows-setup \
@@ -318,6 +318,20 @@ docker-down:
 	@chmod +x $(DOCKER_DEPLOY_SCRIPT)
 	$(DOCKER_DEPLOY_SCRIPT) --purge
 
+# Full workspace + landing tests in Docker, then isolated install/mail/API/TURN checks.
+test-docker:
+	bash tests/docker-test.sh
+
+test-deltachat-docker:
+	bash tests/deltachat-test-docker.sh $(DC_TEST_ARGS)
+
+test-mini-docker:
+	bash tests/deltachat-test-docker.sh --mini-only
+
+test-full-docker:
+	$(MAKE) test-docker
+	$(MAKE) test-deltachat-docker
+
 test: test-unit
 
 # Seed ./data/chatmail.toml so `make run` does not bind production :25 (needs root).
@@ -528,6 +542,8 @@ help:
 	@echo "Deploy:    push, push1 (unsigned), push2 (static+sign+upgrade), push-signed, sign (scripts/sign.sh), log1, log2 (scripts/deploy.sh)"
 	@echo "Incus:     incus-up (data/incus-vm), incus-down (purge container + volume + data); INCUS_ARGS='--rebuild|--with-webadmin'"
 	@echo "Docker:    docker-up (data/docker-vm), docker-down (purge container + image + data); DOCKER_ARGS='--rebuild|--with-webadmin'"
+	@echo "           test-docker (workspace + landing tests in Docker, then install/mail/API/TURN; cleans up containers and volumes)"
+	@echo "           test-deltachat-docker (cmlxc mini + extensive real-client messaging), test-mini-docker, test-full-docker (both suites)"
 	@echo "Test:      test, test-unit, test-e2e, test-maintenance, test-integration, test-imap, test-turn, test-core-turn, test-full-cmlxc (madmail-v2), test-cmlxc-fullrun (cmdeploy+madmail-v2 fullrun), test-cmlxc-fullrun-madmail, test-deltachat-cmlxc, test-mini-cmlxc"
 	@echo "Quality:   check, lint, fmt, fmt-check, cov (unit-test coverage + browser), man, man-lint, man-check"
 	@echo "Init:      init (download iroh-relay $(IROH_RELAY_VERSION) into $(IROH_ASSETS)/)"

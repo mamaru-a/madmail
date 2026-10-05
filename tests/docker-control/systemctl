@@ -1,0 +1,9 @@
+#!/bin/sh
+# Record service lifecycle requests for the external Docker controller.
+set -eu
+case "${1:-}" in
+    restart|stop|start) printf '%s\n' "$1" >> /run/docker-test-service ;;
+    enable|disable|daemon-reload) : ;;
+    is-active|status) pgrep -x madmail >/dev/null ;;
+    *) echo "Unsupported test systemctl action: $*" >&2; exit 1 ;;
+esac

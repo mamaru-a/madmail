@@ -69,7 +69,11 @@ async fn docker_turn_live_allocate() {
 
     let line = extract_turn_metadata_value(&r);
     let parsed = parse_turn_metadata(&line).expect("parse metadata");
-    assert_eq!(parsed.port, control_addr.port());
+    // Docker may publish the container control port on a different host port.
+    let advertised_port = std::env::var("DOCKER_TURN_ADVERTISED_PORT")
+        .map(|p| p.parse::<u16>().expect("DOCKER_TURN_ADVERTISED_PORT"))
+        .unwrap_or(control_addr.port());
+    assert_eq!(parsed.port, advertised_port);
 
     let username = parsed.expiration_timestamp.to_string();
     let realm = parsed.hostname.clone();

@@ -49,6 +49,10 @@ def run_ssh_command(
     timeout: int = 30,
 ) -> tuple[int, str, str]:
     """Run a command on *remote* as root via SSH."""
+    if os.getenv("DELTACHAT_TEST_DOCKER"):
+        from utils.docker_remote import run
+        result = run(remote, command, timeout=timeout)
+        return result.returncode, result.stdout, result.stderr
     user_host = remote if "@" in remote else f"root@{remote}"
     cmd: Sequence[str] = [*ssh_command_prefix(), user_host, command]
     result = subprocess.run(

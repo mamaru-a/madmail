@@ -31,6 +31,11 @@ from email.mime.multipart import MIMEMultipart
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
+# Allow both the suite runner and direct scenario invocation.
+if __package__ in (None, ""):
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from utils.local_server import configure_tls, smtp_connect, imap_connect, search_all
+
 def random_string(length=9):
     """Generate a random alphanumeric string."""
     return ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
@@ -78,7 +83,7 @@ class MaddyTestServer:
         print(f"  HTTP port: {self.http_port}")
         
         # Generate a minimal maddy config that supports auto-create
-        config_content = self._generate_config(state_dir)
+        config_content = configure_tls(self._generate_config(state_dir), state_dir)
         config_path = os.path.join(config_dir, "maddy.conf")
         
         with open(config_path, 'w') as f:
@@ -92,12 +97,16 @@ class MaddyTestServer:
             "-config", config_path,
             "run"
         ]
+        if os.environ.get("DELTACHAT_TEST_DOCKER"):
+            cmd = [maddy_binary, "--config", config_path,
+                   "--state-dir", state_dir, "run"]
         
         print(f"  Starting maddy: {' '.join(cmd)}")
         
+        self.server_log = tempfile.TemporaryFile(mode="w+t")
         self.process = subprocess.Popen(
             cmd,
-            stdout=subprocess.PIPE,
+            stdout=self.server_log,
             stderr=subprocess.STDOUT,
             text=True,
             preexec_fn=os.setsid  # Create new process group for clean shutdown
@@ -112,7 +121,8 @@ class MaddyTestServer:
         while time.time() - start_time < timeout:
             if self.process.poll() is not None:
                 # Process exited - read output
-                output = self.process.stdout.read() if self.process.stdout else ""
+                self.server_log.seek(0)
+                output = self.server_log.read()
                 raise Exception(f"Maddy server exited unexpectedly: {output}")
             
             # Check if we can connect to the ports
@@ -147,6 +157,8 @@ class MaddyTestServer:
             time.sleep(0.5)
         
         # Timeout - read output for debugging
+        self.server_log.seek(0)
+        print(self.server_log.read())
         self.stop()
         raise Exception(f"Server did not start within {timeout}s. Listeners ready mask: {listeners_ready}")
     
@@ -244,6 +256,7 @@ chatmail tcp://127.0.0.1:{self.http_port} {{
                 except ProcessLookupError:
                     pass
             self.process = None
+            self.server_log.close()
         
         # Clean up temp directory
         if self.temp_dir:
@@ -278,7 +291,7 @@ class IMAPIdleClient:
     def connect(self):
         """Connect and login to IMAP server."""
         try:
-            self.imap = imaplib.IMAP4(self.host, self.port)
+            self.imap = imap_connect(self.host, self.port)
             self.imap.login(self.username, self.password)
             self.imap.select('INBOX')
             self.connected = True
@@ -338,7 +351,7 @@ class IMAPIdleClient:
                             # wasn't committed yet when the notification was sent.
                             try:
                                 self.imap.select('INBOX')
-                                status, data = self.imap.search(None, 'ALL')
+                                status, data = search_all(self.imap)
                                 if status == 'OK' and data[0]:
                                     msg_nums = data[0].split()
                                     if msg_nums:
@@ -385,7 +398,7 @@ class IMAPIdleClient:
         try:
             # Need to re-select after IDLE
             self.imap.select('INBOX')
-            status, data = self.imap.search(None, 'ALL')
+            status, data = search_all(self.imap)
             if status != 'OK':
                 return []
             
@@ -418,7 +431,7 @@ def create_account_concurrently(host, smtp_port, imap_port, username, password, 
     # Try SMTP login first (creates account)
     start = time.time()
     try:
-        smtp = smtplib.SMTP(host, smtp_port, timeout=30)
+        smtp = smtp_connect(host, smtp_port, timeout=30)
         timings['smtp_connect'] = time.time() - start
         
         login_start = time.time()
@@ -436,7 +449,7 @@ def create_account_concurrently(host, smtp_port, imap_port, username, password, 
     for attempt in range(1, max_attempts + 1):
         start = time.time()
         try:
-            imap = imaplib.IMAP4(host, imap_port, timeout=30)
+            imap = imap_connect(host, imap_port, timeout=30)
             timings['imap_connect'] = time.time() - start
 
             login_start = time.time()
@@ -691,7 +704,7 @@ def run(test_dir=None, maddy_binary=None, num_accounts=12):
         
         # Sender connects via SMTP
         smtp_connect_start = time.time()
-        smtp = smtplib.SMTP('127.0.0.1', smtp_port, timeout=60)
+        smtp = smtp_connect('127.0.0.1', smtp_port, timeout=60)
         smtp.login(sender['username'], sender['password'])
         print(f"  Sender SMTP login took {time.time() - smtp_connect_start:.2f}s")
         
@@ -729,7 +742,7 @@ def run(test_dir=None, maddy_binary=None, num_accounts=12):
                 send_errors.append(f"Client {client.client_id}: {e}")
                 # Reconnect SMTP if needed
                 try:
-                    smtp = smtplib.SMTP('127.0.0.1', smtp_port, timeout=60)
+                    smtp = smtp_connect('127.0.0.1', smtp_port, timeout=60)
                     smtp.login(sender['username'], sender['password'])
                 except Exception:
                     pass

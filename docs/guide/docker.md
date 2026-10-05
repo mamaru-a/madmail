@@ -791,6 +791,55 @@ docker run ... ghcr.io/themadorg/madmail:latest
 
 ## Build from source
 
+### Automated local Docker tests
+
+From the repository root, run:
+
+```bash
+make test-docker
+```
+
+Requires Bash, Make, and access to the Docker daemon. Rust/Cargo, Bun, and curl run inside Docker; they are not required on the host. The command builds the repository image and test runners, runs `cargo test --workspace --locked --offline` and the landing site's test suite in containers, then installs a fresh self-signed IP relay and checks HTTPS, the embedded dashboard, admin authentication, SMTP TLS/STARTTLS delivery, IMAP retrieval, plaintext rejection, restart persistence, and the live TURN allocation test. Smoke-test clients also run inside Docker.
+
+Test containers and volumes are isolated from `make docker-up` and removed on success or failure. Images and compiled test binaries are cached, and logs are saved under `target/docker-tests/run-*` (`workspace.log`, `landing.log`, and `turn.log`). TCP and TURN control ports are assigned automatically and bound to loopback. Container clients share the relay's network namespace. TURN relay ports default to UDP **55000–55010**; override a conflicting range with:
+
+```bash
+make test-docker MADMAIL_DOCKER_TEST_RELAY_MIN=55100 MADMAIL_DOCKER_TEST_RELAY_MAX=55110
+```
+
+`MADMAIL_DOCKER_TEST_IMAGE` overrides the image tag (default `madmail-local:test-docker`); the image is always rebuilt using Docker's cache. These smoke checks use a synthetic PGP/MIME fixture and verify TURN allocation, not real Delta Chat decryption, browser interactions, public federation, or media packet round-trips.
+
+The workspace's deliberately ignored tests remain ignored, except the live Docker TURN test, which runs separately. The remote-host TURN test needs an external server, and the known realm-authentication test is explicitly disabled in the repository.
+
+### Extensive Delta Chat and cmlxc tests in Docker
+
+```bash
+make test-deltachat-docker  # cmlxc relay_minitest + extensive Delta Chat scenarios
+make test-mini-docker       # just the 11 cmlxc relay_minitest checks
+make test-full-docker       # test-docker followed by test-deltachat-docker
+```
+
+Requires a local Linux Docker daemon, Bash, Make, GNU `timeout`, and the initialized `tests/cmlxc` submodule. Python, pytest, and the Delta Chat RPC client/server run in Docker. No Incus, LXC, SSH server, or systemd is required.
+
+The harness builds two fresh self-signed IP relays on a private Docker network. The existing cmlxc mini-tests exercise local and cross-relay encrypted messaging, Secure Join, HTTP/SMTP fallback under firewall blocks, header privacy, plaintext rejection, and login validation. The extensive suite uses real Delta Chat accounts to test messages, groups, files, federation, No-Log behavior, JIT registration, IDLE/concurrency, purge, Iroh/WebXDC, admin APIs, login validation, `/mxdeliv` security, and a SHA-256-verified large-file roundtrip.
+
+The default Delta Chat selection is **1–9, 11–17, 19, 22–23**. Test 10 requires the official private release-signing key; test 18 asserts the older Go binary's camouflage/version-path contract; tests 20–21 create their own LXC exchanger environments. Those four tests are excluded and explicitly rejected by the Docker harness, rather than reported as passed. Incus targets remain available unchanged.
+
+Select scenarios or increase the roundtrip file size:
+
+```bash
+make test-deltachat-docker DC_TEST_ARGS='--test-3 --test-4 --test-5 --test-6 --test-23 --color'
+make test-deltachat-docker DC_TEST_ARGS='--no-mini --test-23 --color' BIGFILE_E2E_MB=20
+```
+
+The mini-tests run first unless `--no-mini` is supplied. Each client invocation has a 30-minute timeout, configurable with `MADMAIL_DOCKER_DC_TIMEOUT` (seconds). Logs, RPC client traces, and received-file artifacts remain under `target/docker-deltachat-tests/run-*`; test containers, anonymous state/config volumes, and the private network are removed on success, failure, or interruption. Images are cached.
+
+Only the controller/client container mounts the local Docker socket. Control operations are restricted to the two relay IPs created for that run. Relay containers receive `NET_ADMIN` for their isolated firewall tests and publish no host ports. SSH-style scenario calls use Docker exec/restart and actual Docker log snapshots; no fabricated service or log results are supplied. The cmlxc privacy check falls back from unsupported IMAP `UID SEARCH ALL` to equivalent UID enumeration via `FETCH`; its message-header assertions are preserved. Queue-log matching recognizes Rust's `outbound delivery failed, requeued` event as well as the older Go/Postfix wording.
+
+The auxiliary IDLE/concurrency servers use the Rust CLI and self-signed TLS in Docker. Their clients enumerate messages with `FETCH` when `SEARCH ALL` is unsupported, preserving the immediate-retrieval checks. Server output goes to a temporary file so debug logs cannot block delivery by filling an unread pipe.
+
+### Build the image
+
 To build the image locally instead of pulling from GHCR:
 
 ```bash
